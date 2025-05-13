@@ -1,0 +1,234 @@
+---
+title: "STRAVVS ODD usage examples"
+author: "Ben McCormick"
+date: "2024-09-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, echo=FALSE, warning=F, comment=F}
+suppressPackageStartupMessages(library(data.table))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(plotly))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggdist))
+suppressPackageStartupMessages(library(ggpubr))
+```
+
+```{r path, echo=FALSE}
+path.in <- "~/Desktop/Rowett/C5/models/methodsX/"
+setwd(path.in)
+```
+
+```{r tidy.function, echo=FALSE}
+## function to remove [ ] and separate by white space 
+tidy = function (x){
+  # Remove the square brackets and split by spaces
+  cleaned_output <- gsub("\\[|\\]", "", x)  # Remove square brackets
+  tokens <- unlist(strsplit(cleaned_output, "\\s+"))     # Split by spaces
+  return(tokens)
+}
+```
+
+Data are output from BehaviorSpace and assume a structure of:
+#### Businesses: 
+* still open
+* closed
+
+#### Business Changes:
+* strategic changes
+* tactical changes
+
+#### Products:
+* things that were ordered
+* things that have been made
+* things that were delivered
+* things that were imported
+* things that were consumed
+
+#### Equations:
+* how many times each equation was run
+
+```{r process.function, echo=FALSE, messages=FALSE, warning=FALSE}
+## function to process data
+process = function (dat) {
+  businesses <- products <- equations <- NULL
+  ## loop through iterations
+  for(run in 1:ncol(dat)){
+    ## apply function for every row (timestep)
+    alltimes <- t(apply(dat[,run],1,tidy))
+    
+    ## get all dividers
+    business.tokens <- grep("business", alltimes[1,])
+    product.tokens <- grep("product", alltimes[1,])
+    equation.tokens <- grep("equation", alltimes[1,])
+    
+    # Businesses
+    businesses <- rbind(businesses,
+                        data.frame(
+                          iteration = run,
+                          time = 1:nrow(alltimes),
+                          open = as.numeric( alltimes[,business.tokens[1]+2]),
+                          closed = as.numeric( alltimes[,business.tokens[2]+2]),
+                          strategies = as.numeric( alltimes[,business.tokens[3]+2]),
+                          tactics = as.numeric( alltimes[,business.tokens[4]+2]))
+    )
+    
+    # Products
+    for(p in seq_along(product.tokens)){
+      products <- rbind(products,
+                        data.frame(
+                          iteration = run,
+                          time = 1:nrow(alltimes),
+                          product = alltimes[,product.tokens[p]+1],
+                          ordered = as.numeric( alltimes[,product.tokens[p]+2]),
+                          made  = as.numeric( alltimes[,product.tokens[p]+3]),
+                          delivered = as.numeric( alltimes[,product.tokens[p]+4]),
+                          imported = as.numeric( alltimes[,product.tokens[p]+5]),
+                          consumed = as.numeric( alltimes[,product.tokens[p]+6]))
+      )}
+    
+    for(q in seq_along(equation.tokens)){
+      equations <- rbind(equations,
+                         data.frame(
+                           iteration = run,
+                           time = 1:nrow(alltimes),
+                           equation = alltimes[,equation.tokens[1]+1],
+                           used = as.numeric( alltimes[,equation.tokens[1]+2]))
+      )}
+  }
+  
+  return(list(equations = equations, products = products, businesses = businesses))
+}
+```
+
+```{r plot.function, echo=FALSE, messages=FALSE, warning=FALSE}
+plotting = function (equations, products, businesses) {
+  g <- NULL
+  g[["equations"]] <- equations %>%
+    ggplot(., aes(x = time, y = used, by = iteration)) +
+    stat_lineribbon(alpha = 0.3, .width = 0.75, 
+                    fill="gold", colour = "hotpink", size = 0.3)+
+    geom_line(data = .%>%filter(iteration==1),
+              aes(x = time, y = used), 
+              inherit.aes = F, colour = "grey40") +
+    guides(fill="none") +
+    facet_wrap(~equation, nrow=1) + guides(colour = "none") +
+    theme_pubclean() + 
+    theme(strip.background = element_blank(), strip.text = element_text(hjust = 0))+
+    labs(title="Equation calls each timestep", y = "count",
+         caption = "Filled, 75% of 100 iterations; Thin line, median; Grey line, example iteration")
+  
+  g[["products"]] <- products %>%
+    pivot_longer(cols = c(ordered, imported, made, delivered,consumed)) %>%
+    mutate(name = factor(name, levels = c("ordered","imported",
+                                          "made","delivered","consumed"))) %>%
+    ggplot(., aes(x = time, y = value, by = iteration)) +
+    stat_lineribbon(alpha = 0.3, .width = 0.75,
+                    fill="gold", colour = "hotpink", size = 0.3)+
+    geom_line(data = .%>%filter(iteration==1),
+              aes(x = time, y = value), colour = "grey40") +
+    facet_grid(product~name, scales = "free_y") + guides(colour = "none", fill = "none") +
+    theme_pubclean()+ 
+    theme(strip.background = element_blank(), strip.text = element_text(hjust = 0))+
+    labs(title="Product production and movement each timestep", y = "quantity",
+         caption = "Filled, 75% of 100 iterations; Thin line, median; Grey line, example iteration")
+  if (layer_scales(g[["products"]])$y$range$range[2] > 300){
+    g[["products"]] <- g[["products"]] + scale_y_sqrt()
+  }
+  
+  
+  g[["businesses"]] <- businesses %>%
+    pivot_longer(cols = c(open,closed,strategies,tactics)) %>%
+    mutate(name = factor(name, levels = c("open","tactics","strategies","closed"))) %>%
+    ggplot(., aes(x = time, y = value, by = iteration)) +
+    stat_lineribbon(alpha = 0.3, .width = 0.75,
+                    fill="gold", colour = "hotpink", size = 0.3)+
+    geom_line(data = .%>%filter(iteration==1),
+              aes(x = time, y = value), colour = "grey40") + 
+    facet_wrap(~name, nrow=1) + guides(colour = "none") +
+    theme_pubclean()+ 
+    theme(strip.background = element_blank(), strip.text = element_text(hjust = 0))+
+    labs(title="Business status each timestep", y = "count",
+         caption = "Filled, 75% of 100 iterations; Thin line, median; Grey line, example iteration")
+  
+  return(g)
+}
+```
+
+--
+
+## System 1
+A single equation with no catalysts: 
+
+* 2 A + 1 B -> 1 C
+where
+A is imported and there is a constant demand of B. Production of C takes a single time step.
+
+There is a single processor that selects a a process using CBR, but given there is only one process that is alway the same.
+
+```{r V1, echo=FALSE,eval=TRUE}
+sub <- "system1"
+dat <- suppressMessages(read_csv(paste0(path.in,sub,"/STRAVVS_abstraction_v4 ",sub,"-spreadsheet.csv"), 
+                                 skip = 17, col_names = F))
+dat[,1] <- NULL
+
+output <- process(dat)
+g <- plotting(output[["equations"]], output[["products"]], output[["businesses"]])
+```
+
+```{r V1.fig1, echo=FALSE, fig.height = 3, fig.show='hold',eval=TRUE}
+print(g[[1]])
+```
+
+```{r V1.fig2, echo=FALSE, fig.height = 5, fig.show='hold',eval=TRUE}
+print(g[[2]])
+```
+
+```{r V1.fig3, echo=FALSE, fig.height = 3, fig.show='hold',eval=TRUE}
+print(g[[3]])
+```
+
+### NOTES
+The model has both constant production and delivery to satisfy the demand. Products are made in proportion to the demand... all looks OK after the initial hiccup to supply goods (the producer starts with nothing)
+
+--
+
+## Test 2
+Two processes: 
+
+* 2 A + 1 B -> 1 C
+* 1 C + 2 D -[ 1 E ]> 1 F
+where
+A, B and R are imported. E is used as a catalyst so it depreciates over 10 time steps and has to be re-ordered.  There is constant demand of btoh C and F. 
+
+There are 20 processors that are seeded at random (p = 0.5) with a random quantity of E (uniform random between 1 and 3). The initial allocation of processes was done using CBR. Those processors with the E catalyst at start-up should preferentially select the catalysed process.
+
+```{r V2, echo=FALSE,eval=TRUE}
+sub <- "system2"
+dat <- suppressMessages(read_csv(paste0(path.in, sub, "/STRAVVS_abstraction_v4 ",sub,"-spreadsheet_b.csv"), 
+                                 skip = 17, col_names = F))
+dat[,1] <- NULL
+
+output <- process(dat)
+g <- plotting(output[["equations"]], output[["products"]], output[["businesses"]])
+```
+
+```{r V2.fig1, echo=FALSE, fig.height = 3, fig.show='hold',eval=TRUE}
+print(g[[1]])
+```
+
+```{r V2.fig2, echo=FALSE, fig.height = 6, fig.show='hold',eval=TRUE}
+print(g[[2]])
+```
+
+```{r V2.fig3, echo=FALSE, fig.height = 3, fig.show='hold',eval=TRUE}
+print(g[[3]])
+```
+
+### NOTES
+When the catalyst E expires (after 10 time steps, but starting from a random value) there is a brief delay in supply. This delay leads to an under-supply in the same timestep, with over production to compensate (to satisfy the current and previous demand).

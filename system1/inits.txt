@@ -1,0 +1,50 @@
+##defining the world ------------------------
+world,scotland
+use-region-file?,FALSE
+#
+##reading inputs ----------------------------
+use-importer-file?,TRUE
+Importer-file,system1/importers.csv
+use-transporter-file?,FALSE
+consumer-file,system1/consumers.csv
+use-regulator-file?,FALSE
+processor-file,system1/processors.csv
+equation-file,system1/processes.txt
+product-attributes,system1/products.csv
+yield-file,system1/yields.csv
+#
+## agents -----------------------------------
+import-anything?,FALSE
+n-non-file-transporters,1
+instant-transport?,TRUE
+consumer-series?,FALSE
+demand-random?,FALSE
+#
+## decision making --------------------------
+max-budget,1000
+max-change,-50
+max-changes,10
+max-dormant,10
+n-choices,1
+multi-match?,FALSE
+review-tactics?,FALSE
+review-subsidy?,FALSE
+review-strategy?,FALSE
+supplier-choice,all-random
+next-delivery-choice,all-random
+first-delivery-choice,all-random
+transporter-choice,all-random
+Strategical-choice,cbr
+tactical-choice,all-random
+restockON-rescaleOFF,TRUE
+re-invest?,FALSE
+#
+## initialisation ---------------------------
+tick-unit,months
+start-date,01-01-2023
+seed-resources?,TRUE
+n-samples,300
+#
+## output -----------------------------------
+output?,FALSE
+output-dir,system1

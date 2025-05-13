@@ -1,0 +1,6 @@
+eq.dairy,patch/$lca < 5,triangular,2 9 12
+eq.beef,patch/$lca < 5,triangular,2 9 1210
+eq.sheep,patch/$lca < 5,triangular,2 9 12$months = 9
+eq.chicken.eggs,patch/$lca < 5,triangular,2 9 12
+eq.beef.processing,patch/$lca < 5,triangular,2 9 12
+eq.sheep.processing,patch/$lca < 5,triangular,2 9 12

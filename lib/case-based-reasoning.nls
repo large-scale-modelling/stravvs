@@ -1,0 +1,470 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Case Based Reasoning
+;; based on cbr extension by Doug Salt
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; (1)
+;; Make a case base using a collection of table triplicates
+;; that are aggregated into a single 'case base'
+;; (2)
+;; Make a test case that we are interested in comparing to the
+;; case base
+;; (3)
+;; Return the closest match
+
+; {} table-example
+; example code to report best matching equation for
+; the index-case given their catalysts
+to-report table-example [multiple?]
+  ;; build the case-base
+  let case-base make-case-base "global"
+  
+  ;; build the test-case
+  let test-case [stock-summary] of one-of processors ;index-case
+  print test-case
+  ;; declare the lambda comparator
+  ifelse multiple? [
+    report get-tactics case-base test-case
+  ][
+    report get-tactic case-base test-case
+  ]
+end
+
+
+;{processor} sense-world
+;
+; function to build a table of the world view from one processor
+
+;; BEN ;; add each new case to local memory
+
+to-report sense-world [ my-stock ]
+  let sense table:make
+  ;[catalysts][running budget][capacity][demand]
+  
+  ; for each resource owned, add the global demand
+  foreach table:keys my-stock [ x ->
+    ifelse table:has-key? things-ordered x [
+      table:put sense x table:get things-ordered x
+    ][
+      table:put sense x 0 ;not ordered yet
+    ]
+  ]
+  
+  ; for each process run, add capacity
+  ;  foreach [name] of implement-neighbors [ x ->
+  ;    ifelse table:has-key? capacity x [ ; have current capacity
+  ;      table:put sense x table:get capacity x
+  ;    ][ ; have NO current capacity
+  ;      table:put sense x 0
+  ;    ]
+  ;  ]
+  
+  ; current activity
+  ;table:put sense "activities" [name] of implement-neighbors
+  
+  ; add current budget
+  table:put sense "budget" budget
+  
+  if verbose? [print (sentence "SENSE-WORLD " self " sense " sense)]
+  report sense
+end
+
+
+;{} actual-world
+;
+; function to build a table of the world view from no processors
+
+to-report actual-world
+  let sense cbr:new
+  let eq []
+  ;[catalysts][running budget][capacity][demand]
+  
+  foreach [name] of processes [ x ->
+    ; space for this case
+    let eq-case table:make 
+    
+    let requirements [get-catalyst] of one-of processes with [name = x]
+    ;set requirements (sentence requirements [get-input] of one-of processes with [name = x])
+    ;set requirements (sentence requirements [get-output] of one-of processes with [name = x])
+    
+    ; add each product used, input or catalyst
+    foreach requirements [ y ->
+      table:put eq-case y [amount] of one-of products with [product-type = y AND shelflife = "archetype"]
+    ]
+    
+    ; add the name of the equation & capacity
+    table:put eq-case x 1
+    
+    ; add all other equations run
+    ; table:put eq-case "activities" (list x)
+    
+    ; add current budget
+    table:put eq-case "budget" 0
+    
+    ;; add to the case-base
+    set eq cbr:add sense eq-case "eq" x
+  ]
+  
+  report sense
+end
+
+; {} table-comparator 
+; Function to score the case versus the case base
+; adapted from the cbr example - here to use tables
+; +1 for matching a key
+; ignore matching values
+; the 'best' match should maximise matching keys only 
+
+to-report table-comparator [ some-case-base src-case obj-case ref-case ]
+  
+  let src-state cbr:state some-case-base src-case
+  let src-decision cbr:decision some-case-base src-case
+  let src-hits 0
+  
+  let obj-state cbr:state some-case-base obj-case
+  let obj-decision cbr:decision some-case-base obj-case
+  let obj-hits 0
+  
+  let ref-state cbr:state some-case-base ref-case
+  let ref-decision cbr:decision some-case-base ref-case
+  
+  ;if verbose? [print (sentence "TABLE-COMPARATOR " "ref-state " ref-state)]
+  
+  ;print (sentence "TABLE-COMPARATOR ref-state " ref-state )
+  
+  set src-hits compare-cases ref-state src-state
+  if verbose? [print (sentence "TABLE-COMPARATOR src-state " src-state " SCORE " src-hits)]
+  
+  set obj-hits compare-cases ref-state obj-state
+  ;print (sentence "TABLE-COMPARATOR obj-state " obj-state " SCORE " obj-hits)
+  
+  if src-decision != ref-decision
+  and obj-decision = ref-decision [
+    ;show "<>gt"
+    report cbr:gt
+  ]
+  
+  if  src-decision != ref-decision [
+    ;show "incmp"
+    report cbr:incmp
+  ]
+  
+  if  obj-decision != ref-decision [
+    ;show "<>lt"
+    report cbr:lt
+  ]
+  
+  (ifelse
+    src-hits > obj-hits [
+      ;show "lt"
+      report cbr:lt
+    ]
+    src-hits < obj-hits [
+      ;show "gt"
+      report cbr:gt
+    ]
+    src-hits = obj-hits [
+      ;show "gt"
+      report cbr:eq
+    ]
+    [
+      ;show "eq"
+      report cbr:incmp
+    ]
+  )
+end
+
+
+
+;{} make-case-base
+;report a table of either local resources and sense of current demands or
+;a global table of all processes and resource requirements and demands
+to-report make-case-base [case-scale]
+  (ifelse case-scale = "global" [ ; global perspective
+    report actual-world
+  ] case-scale = "local"    [ ; local (processor) perspective
+    let view sense-world [stock-summary] of self
+    if verbose? [print (sentence "MAKE-CASE-BASE local sense: " view)  ]
+    report view
+  ][
+    error (word "make-case-base expected \"global\" or \"local\" but got " case-scale)
+  ])
+end
+
+
+; {} get-tactic
+; function to return the best matching equation given 
+; the catalysts owned (test-case) and the catalysts
+; needed by each process
+to-report get-tactic [table-case-base test-case] 
+  cbr:lambda table-case-base table-comparator
+  if verbose? [print (word self " GET-TACTIC Table Case: " table-case-base " | Test Case " test-case)]
+  let result cbr:match table-case-base test-case "eq"
+  if verbose? [print (word self " GET-TACTIC Test case: " test-case " results in " cbr:outcome table-case-base result)]
+  report cbr:outcome table-case-base result
+end
+
+
+; {} get-tactics
+; function to return the multiple matching equations given 
+; the catalysts owned (test-case) and the catalysts
+; needed by each process
+to-report get-tactics [table-case-base test-case]
+  if verbose? [print (word self " GET-TACTICS about to make lambda")  ]
+  cbr:lambda table-case-base table-comparator
+  if verbose? [print (word self " GET-TACTIC Table Case: " table-case-base " | Test Case " test-case)]
+  
+  let result cbr:matches table-case-base test-case "eq"
+  
+  ;print (word self "GET-TACTICS results: " result)
+  if verbose? [print (word self " GET-TACTICS Test case: " test-case " results in " parse-cases result table-case-base )]
+  ;print (word self " GET-TACTICS Test case: " test-case " results in " parse-cases result table-case-base )
+  report parse-cases result table-case-base 
+  ;let result match-cases table-case-base test-case 
+  ;report result
+end
+
+
+
+; {} get-multi-tactics
+; function to return the multiple matching equations given 
+; the catalysts owned (test-case) and the catalysts
+; needed by each process 
+; NOTE: the maxiumum number of equations picked is set by n-choices on the GUI
+;; CALLED BY: set eq get-multi-tactics global-case-base sense-world [stock-summary] of self
+to-report get-multi-tactic [print?]
+  
+  ;; BEN ;;
+  ;this is returning nothing at all if there is no current capacity. 
+  ;It should return something at least so that the processor can at least invest in missing resources
+  
+  if print? [ print "\n" ]
+  if print? [ print self ]
+  
+  ; identify current available stock 
+  let my-stock [stock-summary] of self
+  
+  let min-capacity infinite ; holder for the minimum capacity
+  let n-eq 0 ; holder to cap the number of equations run
+  let eq []
+  let tmp-eq []
+  
+  ;; only continue to look for matching equations if there is 
+  ;; - non-zero capacity to do anything
+  ;; - the current number of equations is less than the maximum allowed (in the GUI)
+  while [ ;min-capacity > 0 AND  ;; removed requirement for minimum capacity
+    n-eq <= n-choices][
+    if print? [ print (sentence "STOCK: " my-stock) ]
+    if print? [ print (sentence "STATS: " min-capacity " " n-eq  " " )    ]
+    if print? [ print (sentence "SENSE: " sense-world my-stock) ]
+    
+    ;; find the best match (including all tied matches)
+    set tmp-eq (get-tactics global-case-base sense-world my-stock) 
+    ;; randomly select one of the best matches (uniform probability)
+    set tmp-eq one-of tmp-eq
+  if print? [ print (sentence "TMP eq: " tmp-eq) ]
+  
+  let tmp-capacity get-capacity-process tmp-eq my-stock    
+  if print? [ print (sentence "TMP cap: " tmp-capacity) ]
+  
+  set min-capacity ifelse-value (tmp-capacity <= min-capacity )[tmp-capacity][min-capacity]
+  set n-eq n-eq + 1 ; add to the the number of equations
+  
+  ;; only continue if there is capacity, otherwise terminate the loop
+  if ;(min-capacity > 0) AND ;; removed requirement for minimum capacity
+    (n-eq <= n-choices) [
+    set eq lput tmp-eq eq
+    
+    ;; remove stock by capacity
+    let stock-needed []
+    ask one-of processes with [name = tmp-eq] [
+      set stock-needed get-catalysts 
+    ]
+      if print? [print (sentence "STOCK NEEDED: " stock-needed)]
+    
+    foreach stock-needed [ i ->
+      let thing first i
+      let amount-thing last i
+      if print? [ print (sentence "TEST: " thing "   AMOUNT: " amount-thing) ]
+      (ifelse table:has-key? my-stock thing [        
+        table:put my-stock thing (table:get my-stock (first i)) - (tmp-capacity * amount-thing)
+        if print? [ print (sentence "TESTED: " thing "   NEW AMOUNT: " table:get my-stock thing) ]
+        if table:get my-stock thing <= 0 [
+          table:remove my-stock thing
+        ]
+      ][
+          ;; not strictly an error because the processor can 
+          ;; invest in capacity later
+        print (word "Error - processor doesn't have " i)
+      ])      
+    ] ; end foreach 
+  ] ; end if (capacity >0 and n-eq <N)  
+] ; end while
+  
+  ;; only unique processes
+  set eq remove-duplicates eq
+if print? [ print eq ]
+report eq
+end
+
+
+to-report compare-cases [case1 case2]
+  ;print (sentence "COMPARE-CASES ")
+  ;print (sentence "CASE1 " case1)
+  ;print (sentence "CASE2 " case2)
+  
+  ; gather all the common keys
+  let common-keys reduce intersect (list table:keys case1 table:keys case2)  
+  ;print (word "COMMON " common-keys)
+  ; gather all the discrepant keys
+  let uncommon-keys reduce not-intersect (list table:keys case1 table:keys case2)
+  ;print (word "UNCOMMON " uncommon-keys)
+  
+  ; length (number of) common keys
+  let n-common-keys length common-keys
+  let n-uncommon-keys length uncommon-keys
+  
+  ; score - start with a positive score for all matching keys in the table, 
+  ; but deducting all discrepant keys
+  let score (n-common-keys * key-match) - (n-uncommon-keys)
+  
+  ; deduct keys that are in the reference, but not test case
+  let mismatch length reduce intersect (list uncommon-keys table:keys case2)
+  
+  set score score - mismatch
+  
+  ; if any common keys --------------
+  if n-common-keys > 0 [ ; for each key that matches
+    foreach common-keys [ i ->
+      let value-case1 table:get case1 i
+      let value-case2 table:get case2 i
+      
+      (ifelse is-number? value-case1 AND is-number? value-case2[
+        ifelse value-case1 >= value-case2  [ ; if the value if equal or more then add to the score
+          set score score + value-match
+        ][
+          set score score - (value-match / 2) ; if the value if less then add to the score
+        ]
+      ] is-list? value-case1 OR is-list? value-case2 [
+        ifelse length value-case1 = 0 AND length value-case2 = 0[
+          set score score + value-match
+        ][
+          set score score + (length reduce intersect (list value-case1 value-case2)) * (value-match / length value-case2)
+          ; subtract for all the uncommon elements
+          set score score - (length reduce not-intersect (list value-case1 value-case2)) * (value-match / length value-case2)               
+        ]
+      ])
+    ]
+  ]
+  ;print (sentence "Score " score)
+  report score
+end
+
+
+
+
+
+; {processor}
+to-report set-processes [scope multiple?]
+  let the-processor self
+  
+  ;  print "\n"
+  ;  print self
+  
+  ;set cap table:make ; storage for capacity
+  let rem-stock stock-summary ; pre-allocated stock
+  let catalyst-needed table:make
+  let catalyst-got table:make
+  
+  ;print (sentence "SET-PROCESSES " )  
+  
+  ;; select candidate process -------------
+  let eq []
+  (ifelse scope = "local" [
+    ifelse multiple? [
+      print (sentence "SET-PROCESSES local & multiple" )      
+      set eq get-tactics my-memory rem-stock ; single best equation
+    ][
+      print (sentence "SET-PROCESSES local & NOT multiple" )            
+      set eq get-tactic my-memory rem-stock ; single best equation
+    ]
+  ] scope = "global" [
+    ifelse multiple? [
+      print (sentence "SET-PROCESSES global & multiple" )            
+      set eq get-tactics global-case-base rem-stock ; single best equation
+    ][
+      print (sentence "SET-PROCESSES global & NOT multiple" )            
+      set eq get-tactic global-case-base rem-stock ; single best equation
+    ]
+  ][
+    error (word "set-processes: wrong scope for selecting case-base")
+  ])
+  
+  ; turn into discrete pieces
+  set eq (sentence eq)
+  print (sentence "SET-PROCESSES eq " eq " length eq " length eq)      
+  report eq
+  
+  ;  ifelse length eq > 1 [
+  ;    foreach eq [ x ->
+  ;      ;; determine the catalysts needed for the candidate process -------------  
+  ;      ask one-of processes with [name = x] [
+  ;        set catalyst-needed table:from-list get-catalysts
+  ;      ]
+  ;      print (sentence "SET-PROCESSES got stock " catalyst-needed)          
+  ;      
+  ;      table:put capacity x get-capacity-process x   
+  ;      print (sentence "SET-PROCESSES capacity " capacity)              
+  ;    ]
+  ;  ][
+  ;    print (sentence "SET-PROCESSES got stuck!")          
+  ;    
+  ;    ask one-of processes with [name = eq] [
+  ;      set catalyst-needed table:from-list get-catalysts
+  ;    ]
+  ;    print (sentence "SET-PROCESSES got stock " catalyst-needed)          
+  ;    
+  ;    table:put capacity eq get-capacity-process eq   
+  ;    print (sentence "SET-PROCESSES capacity " capacity) 
+  ;  ]
+end
+
+
+; https://stackoverflow.com/questions/22615519/netlogo-weighted-random-draw-from-a-list-how-to-use-rnd-extension
+to-report weighted-rand [values weights]
+  ;let values [1 2 3]
+  ;let probabilities [0.2 0.3 0.5]
+  ;let weights [5 7 9]
+  
+  ; replace all weights < 0 with 0
+  set weights map [ i -> ( i + abs i ) / 2 ] weights
+  ; calculate the cumulative probability list  
+  set weights partial-sums weights
+  ;print(weights)
+  
+  ; Roll a uniform random number weighted by the cumulative probability vector
+  let x random-float max weights
+  let j  -1
+  let found false
+  while [(not found) and (j < (length weights))]
+  [
+    set j (j + 1)
+    if (x <= item j weights) [set found true]
+  ]
+  
+  report item j values
+end
+
+; https://stackoverflow.com/questions/33570658/how-make-a-list-of-cumulative-sum-in-netlogo
+;to-report partial-sums [lst]
+;report butfirst reduce [[result-so-far next-item] -> lput (next-item + last 
+;result-so-far) result-so-far] fput [0] lst
+;end
+
+
+
+; {procssor} parse-cases
+; return the outcome from multiple cases
+to-report parse-cases [cases case-base]  
+  report map [x -> cbr:outcome case-base x] cases   
+end

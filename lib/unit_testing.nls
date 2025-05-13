@@ -1,0 +1,179 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Unit testing procedures
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; count failures
+to fail
+  set n-fails n-fails + 1
+  set n-tests n-tests + 1
+end
+
+; count passes
+to pass
+  set n-tests n-tests + 1
+end
+
+; test whether list equals expectations
+to assert-list-equals [ msg want get ]
+  (ifelse not (is-list? want and is-list? get) [
+    output-print (word msg ": FAIL (wanted "
+      (ifelse-value is-list? want [ "is" ] [ "is not" ]) " a list; got "
+      (ifelse-value is-list? get [ "is" ] [ "is not" ]) " a list)")
+    fail
+  ] length want != length get [
+    output-print (word msg ": FAIL (wanted list length " (length want)
+      "; got list length " (length get) ")")
+    fail
+  ] [
+    foreach (n-values (length want) [ i -> i ]) [ i ->
+      assert-equals (word msg " [" i "]") (item i want) (item i get)
+    ]
+    pass
+  ])
+end
+
+; test whether function equals expectations
+to assert-equals [ msg want get ]
+  ifelse want = get [
+    output-print (word msg ": OK")
+    pass
+  ] [
+    output-print (word msg ": FAIL (wanted \"" want "\"; got \"" get "\")")
+    fail
+  ]
+end
+
+; test whether function does not equal expectations
+to assert-not-equals [ msg want get ]
+  ifelse want != get [
+    output-print (word msg ": OK")
+    pass
+  ] [
+    output-print (word msg ": FAIL (wanted \"" want "\"; got \"" get "\")")
+    fail
+  ]
+end
+
+; test whether boolean is true
+to assert-true [ msg get? ]
+  (ifelse not is-boolean? get? [
+    output-print (word msg ": FAIL (wanted a boolean, got \"" get? "\")")
+    fail
+  ] get? [
+    output-print (word msg ": OK")
+    pass
+  ] [
+    output-print (word msg ": FAIL (wanted true; got false)")
+    fail
+  ])
+end
+
+; test whether boolean is false
+to assert-false [ msg get? ]
+  (ifelse not is-boolean? get? [
+    output-print (word msg ": FAIL (wanted a boolean, got \"" get? "\")")
+    fail
+  ] get? [
+    output-print (word msg ": FAIL (wanted false; got true)")
+    fail
+  ] [
+    output-print (word msg ": OK")
+    pass
+  ])
+end
+
+; test whether anybody detected
+to assert-anybody [msg get?]
+  ifelse get? != nobody [
+    output-print (word msg ": OK")
+    pass
+  ] [
+    output-print (word msg ": FAIL (wanted an agent; got nobody)")
+    fail
+  ]
+end
+
+; test whether there is an appropriate match in a list
+to assert-member [msg single-thing full-list]
+  ifelse member? single-thing full-list [
+    output-print (word msg ": OK")
+    pass
+  ] [
+    output-print (word msg ": FAIL (" single-thing " not member of " full-list)
+    fail
+  ]
+end
+
+; test whether object is a number
+to assert-number [msg thing]
+  ifelse is-number? thing [
+    output-print (word msg ": OK")
+    pass
+  ] [
+    output-print (word msg ": FAIL (wanted a number; got " value-type thing)
+    fail
+  ]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Unit testing procedures
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; unit testing function to distribute to the appropriate test
+to test [function substep comparison first-thing second-thing]  
+  if testing? [
+    (ifelse comparison = "list-equals" [
+      assert-list-equals (sentence function " " substep) first-thing second-thing 
+    ] comparison = "equals" [
+      assert-equals (sentence function " " substep) first-thing second-thing 
+    ]comparison = "not-equals"[
+      assert-not-equals (sentence function " " substep) first-thing second-thing 
+    ]comparison = "true"[
+      assert-true (sentence function " " substep) first-thing 
+    ]comparison = "false" [
+      assert-false (sentence function " " substep) first-thing 
+    ]comparison = "anybody"[
+      assert-anybody (sentence function " " substep) first-thing 
+    ]comparison = "member"[
+      assert-member (sentence function " " substep) first-thing second-thing 
+    ]comparison = "number"[
+      assert-number (sentence function " " substep) first-thing 
+    ][
+      error (sentence "Expected a different comparison in testing. Got " comparison)
+    ])  
+  ]
+end
+
+; report testing result
+to report-testing
+  if testing? [
+    if testing? [
+      output-print (word "Unit tests complete: " n-fails " failures of " n-tests " tests")
+      if n-tests > 0 [
+        output-print (word "Pass rate: " (precision ((n-tests - n-fails) * 100 / n-tests) 1) "%")
+      ]
+    ]
+  ]
+end
+
+; output unit testing
+to unit-test
+  clear-all
+
+  set n-fails 0
+  set n-tests 0
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ; Call unit testing procedures here
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ; End of unit test: report results
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  output-print (word "Unit tests complete: " n-fails " failures of " n-tests " tests")
+  if n-tests > 0 [
+    output-print (word "Pass rate: " (precision ((n-tests - n-fails) * 100 / n-tests) 1) "%")
+  ]
+end

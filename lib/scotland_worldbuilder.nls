@@ -1,0 +1,93 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;        1         2         3         4         5         6          7         8
+;23456789012345678901234567890123456789012345678901234567890123445678901234567890
+;
+; Social Sciences Simulation World Builder
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; build-map()
+; (1) either load mapping data via a shapefile or define a physical space for the
+; agents to occupy
+; (2) generate all agents from input files: importers, consumers, processors, 
+; regulators, and if applicable, transporters
+to build-map
+  ; read / create regions
+  ifelse use-region-file? [
+
+    ; load regions from GIS
+    set region-map gis:load-dataset region-file
+
+    ;; make sure there is a "NAME" field that describes the different regions
+    if NOT member? "NAME" (gis:property-names region-map)  [
+      file-error "map" "region-file" 1 "expected a NAME field in the region file" "did not"]
+
+    print-progress (word "Read GIS data from \"" region-file "\" and now there are "
+      (length gis:feature-list-of region-map) " regions")
+
+    gis:set-world-envelope (gis:envelope-of region-map)
+    gis:set-drawing-color 0
+
+    draw-polygon
+    
+    ; make table of regions
+    create-regions length (gis:feature-list-of region-map) [
+      set regional-state table:make
+      set name "everywhere"
+      set hidden? TRUE
+    ]
+  ] [
+    create-regions 1 [
+      set regional-state table:make
+      set name "everywhere"
+      set hidden? TRUE
+    ]
+  ]
+
+  set global-state table:make
+
+  ask patches [
+    set patch-state table:make
+  ]
+  
+  if not error-state? [
+    ; read the agents
+    if use-importer-file? [read-agents importer-file "importer"]
+    if use-consumer-file? [read-agents consumer-file "consumer"]
+    if use-processor-file? [read-agents processor-file "processor"]
+    if use-regulator-file? [read-agents regulator-file "regulator"]
+    
+    if consumer-series? [read-series consumer-timeseries-file]
+    
+    ifelse use-transporter-file? [
+      read-agents transporter-file "transporter"
+    ] [
+      create-transporters n-non-file-transporters [
+        set shape "truck"
+        ifelse use-region-file? [
+          ;randomly pick a region (from the feature-list) & randomly pick a point within it
+          let loc gis:location-of gis:random-point-inside (one-of gis:feature-list-of region-map)
+          setxy (item 0 loc) (item 1 loc)
+        ][
+          set xcor random-xcor
+          set ycor random-ycor
+        ]
+        set size 0.1
+        set laden-distance 0
+        set unladen-distance 0
+        set speed non-file-transporter-speed
+        set max-cargo non-file-transporter-capacity
+        set destination nobody
+        set deliveries []
+        set in-transit? false
+        set hidden? instant-transport?
+      ]
+    ]
+    set suppliers table:make ; this table is built as suppliers-of is used
+  ]
+end
+
+; Draw the multi-polygon countries dataset to the drawing layer
+to draw-polygon
+  gis:set-drawing-color (green + 3)
+  gis:fill region-map 1
+end

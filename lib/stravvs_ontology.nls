@@ -1,0 +1,226 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;        1         2         3         4         5         6          7         8
+;23456789012345678901234567890123456789012345678901234567890123445678901234567890
+;
+; STRAVVS Ontology
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Regions are geographies that contain state data to be used with constraints
+breed [regions region]
+
+regions-own [
+  name ; an identifier for the region (must be unique, cannot be empty)
+  regional-state ; table of state variables at regional level
+]
+
+; Processors are agents that maintain a list of orders to make products needed
+; by consumers and other Processors
+breed [processors processor]
+
+processors-own [
+  name ; an identifier for the processor (must be unique, but can be empty)
+  location; a regional name if appropriate (region file)
+  orders ; table of product-type to [amount, who wants it]
+  ordered ; table of product-type to [amount, who supplies it]
+  local-state ; table of state variables at local (this agent) level
+  processor-region ; where the processor is located
+  running ; table of [process time-left] of processes currently running
+  friends; list of previous suppliers
+  ;resources; table of agent resources (i.e. catalysts) that can scale up equations
+  capacity ;multiply production
+  budget ;running bank balance
+  long-budget; long-term tally of deficit
+  my-memory; local case-base
+             ;;
+  cluster-owned
+  component-id
+  component-explored?
+  path-degree-centrality
+  ;;
+  discontent ;counter for change
+  dormant ;counter for how long nothing has been done within the year.. then habit-change
+  long-dormant ; long-term counter of dormancy
+  changed ;counter for number of changes
+  closed ;binary indicator if active or not
+]
+
+; Processes are represented as agents, but in fact are merely containers for
+; 'equations' (in a chemical sense) that show what outputs are possible given
+; which inputs. Processes are implemented by Processors.
+breed [processes process]
+
+processes-own [
+  name ; an identifier for the process (must be unique, cannot be empty)
+  time-taken ; Not currently implemented
+  price ;Cost of inputs + cataysts needed to run
+]
+
+; Meta-processes are represented as agents, but in fact are merely containers for
+; 'equations' (in a chemical sense) that modify other equations (processes.
+breed [metaprocesses metaprocess]
+
+metaprocesses-own [
+  name ; an identifier for the process (must be unique, cannot be empty)
+  time-taken ; Not currently implemented
+  price ;Cost of inputs + cataysts needed to run
+  changed ; list of equations effected
+  effects ;table of products effected by meta-process
+]
+
+; Products are physical instances of product types (strings) located in space
+; with an amount. They are imported by importers, consumed by consumers, and
+; converted into other products by processors.
+breed [products product]
+
+products-own [
+  product-type ; String
+  amount ; Numeric
+  shelflife; String - how long could it last
+  ;role ; String - describes the function of the product for the current owner
+]
+
+; Consumers consume products
+breed [consumers consumer]
+consumers-own [
+  name ; an identifier for the processor (must be unique, but can be empty)
+  location; a regional name if appropriate (region file)
+  demand ; table of product-type to amount per tick
+  consumption ; table of product-type to amount
+  unfulfilled-demand ; table of product-type to amount
+  ordered; list of [supplier good] currently waiting for
+  friends; list of previous suppliers
+]
+
+; Importers import products
+breed [importers importer]
+importers-own [
+  name ; an identifier for the processor (must be unique, but can be empty)
+  location; a regional name if appropriate (region file)
+  canget; the product supplied
+  volume ; table of product-type to amount
+]
+
+; Local-importers import products
+breed [local-importers local-importer]
+local-importers-own [
+  name ; an identifier for the processor (must be unique, but can be empty)
+  location; a regional name if appropriate (region file)
+  canget; the product supplied
+  volume ; table of product-type to amount
+  capacity ; capacity = size of patch
+]
+
+; 'Limits' are local, regional or global conditions necessary for Processes
+; to run
+breed [limits limit]
+limits-own [
+  level ; "global", "regional", "local" or "patch" (patch not recommended, but is provided)
+  state-variable ; name of a *-state variable to look up and check the value of
+  op ; comparison operator ("!=", "=", "<", ">", "<=", ">=", "in", "!in")
+  value ; comparison value (list for "in" or "!in" operators)
+]
+
+
+; 'yields' are local, regional or global conditions that modify process outputs
+; to run
+breed [yields yield]
+yields-own [
+  yield-name ;equation name
+  level ; "global", "regional", "local" or "patch" (patch not recommended, but is provided)
+  state-variable ; name of a *-state variable to look up and check the value of
+  op ; comparison operator ("!=", "=", "<", ">", "<=", ">=", "in", "!in")
+  value ; comparison value (list for "in" or "!in" operators)
+  distribution ; name of distribution to sample
+  dist-param; distribution parameters
+]
+
+; Transporters shift produce around the space
+breed [transporters transporter]
+
+transporters-own [
+  deliveries ; list of lists containing [source, destination, product]
+  max-cargo ; amounts of cargo may not exceed this
+  laden-distance ; total distance travelled with any cargo
+  unladen-distance ; total distance travelled with no cargo
+  speed ; patches per tick
+  destination ; next turtle to stop at
+  in-transit?
+]
+
+; Regulators regulate product trade
+; in the first instance they pay a subsidy for all producers running
+; specified equations
+breed [regulators regulator]
+
+regulators-own [
+  location ;a regional name if appropriate (region file)
+  promoted ; table of product names and subsidy value
+  penalised ; table of product names and subsidy value
+]
+
+; Patches are the physical spaces and can have state variables that influence
+; processes and the transport between other agents
+patches-own [
+  patch-state
+  resource
+  cluster-id
+  cluster-owner
+  trade-here?
+]
+
+; catalysts link catalysts to processes
+directed-link-breed [catalysts catalyst]
+
+;catalysts-own [n] ;quantity of catalyst needed to run equation
+
+; Inputs link ingredients to processes
+directed-link-breed [inputs input]
+
+;inputs-own [n];quantity of input needed to run equation
+
+; Outputs connect processes to Makes
+directed-link-breed [outputs output]
+
+;outputs-own [n];quantity of output needed to run equation
+
+; Constraints connect Processes to Limits -- acting conjunctively
+directed-link-breed [constraints constraint]
+
+; uncertaintys link Processes to Yields that might change outcomes
+directed-link-breed [uncertainties uncertainty]
+
+; Implements link Processors to Processes they might run
+directed-link-breed [implements implement]
+
+implements-own [
+  scale
+  ;adjustment ;table with [amount duration] if other equations change outputs
+]
+
+; modifications link meta-processes to the processes they modify
+directed-link-breed [modifications modification] 
+
+; Stocks link Processors and Consumers to Products
+directed-link-breed [stocks stock]
+
+; Cargoes link Transporters to Products being moved
+directed-link-breed [cargoes cargo]
+
+cargoes-own [
+  address ; who wants the product at the other-end
+]
+
+; Trade link joins all processors as potential trade partners
+undirected-link-breed [trades trade]
+
+trades-own [
+  cost ; the cost of trade between any two points on the network
+]
+
+; Controls link regulators to processes
+directed-link-breed [controls control]
+
+; Paths link Processors to describe the friction for trade between them
+undirected-link-breed [ paths path ]
+
+paths-own [cost]

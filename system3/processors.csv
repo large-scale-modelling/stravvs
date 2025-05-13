@@ -1,0 +1,18 @@
+NE,eq.beef.processing,*,hours 3000
+NE,unknown,*,hours 2000,grazing.ha 4.3,sheep.ewe 261,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 349.7
+NE,unknown,*,hours 2000,grazing.ha 0,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2592,grazing.ha 343.8,sheep.ewe 180,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 237.9
+NE,unknown,*,hours 2000,grazing.ha 10.1,sheep.ewe 178,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 237.9
+NE,unknown,*,hours 2000,grazing.ha 0,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2000,grazing.ha 5.4,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2000,grazing.ha 0.3,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2000,grazing.ha 0,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2592,grazing.ha 1.3,sheep.ewe 0,chicken.hen 0,beef.cow 42,dairy.cow 0,indoors.m2 430
+NE,unknown,*,hours 2148,grazing.ha 174.6,sheep.ewe 1039,chicken.hen 0,beef.cow 47,dairy.cow 0,indoors.m2 1984.1
+NE,unknown,*,hours 2000,grazing.ha 0,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2000,grazing.ha 0,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2000,grazing.ha 1.2,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2000,grazing.ha 0,sheep.ewe 0,chicken.hen 7,beef.cow 0,dairy.cow 0,indoors.m2 1.05
+NE,unknown,*,hours 2000,grazing.ha 1.4,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2000,grazing.ha 0,sheep.ewe 0,chicken.hen 0,beef.cow 0,dairy.cow 0,indoors.m2 0
+NE,unknown,*,hours 2592,grazing.ha 0,sheep.ewe 0,chicken.hen 15241,beef.cow 0,dairy.cow 0,indoors.m2 2286.15

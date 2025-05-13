@@ -1,0 +1,6 @@
+eq.dairy : 10 food.kg -[ 1 dairy.cow + 10 indoors.m2 ]> 100 milk.l | 1 month
+eq.beef : 20 food.kg -[ 1 beef.cow + 20 grazing.ha ]> 300 beef.calf | 1 year | global/$months = 10
+eq.sheep : 350 food.kg -[ 100 sheep.ewe + 10 grazing.ha ]> 120 sheep.lamb | 1 year | global/$months = 9
+eq.chicken.eggs : 35 food.kg -[ 1 chicken.hen + 0.1 indoors.m2 ]> 275 chicken.egg | 1 year
+eq.beef.processing : 300 beef.calf -[ 0.1 hours ]> 240 beef.meat.kg | 1 day
+eq.sheep.processing : 1 sheep.lamb -[ 0.1 hours ]> 17 sheep.meat.kg | 1 day

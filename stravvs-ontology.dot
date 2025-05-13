@@ -1,0 +1,78 @@
+digraph stravvs_ontology {
+	fontname = "Helvetica-Bold";
+	fontsize = "16";
+	label = "STRAVVS Ontology";
+	labelloc = "t";
+	node [fontname = "Helvetica", fontsize = "14", shape = "Mrecord"];
+	edge [fontname = "Helvetica", fontsize = "12", arrowhead = "vee"];
+     
+    ## Agents (nodes)
+    # space
+	region [label = "{Region|name\nregional-state}"];    	
+	patch [label = "{Patch|patch-state\nresource\ncluster-id\ncluster-owner\ntrade-here?}"];
+	# location
+	#access_point [label = "{Access point}"];	
+	limit [label = "{Limit|level\nstate-variable\nop\nvalue}"];
+	yield [label = "{Yield|yield-name\nlevel\nstate-variable\nop\nvalue\ndistribution\ndist-param}"];
+	# system actors
+	processor [label = "{Processor|name\norders\nlocal-state\nlocation\nrunning\nbudget\ncapacity\nlong-budget\nmu-memory\ncluster-owned\ncomponent-id\ncomponent-expored?\npath-degree-centrality\ndiscontent\ndormant\nlong-dormant\nchanged\nclosed}"];	
+	consumer [label = "{Consumer|name\nlocation\ndemand\nconsumption\nunfulfilled-demand\nordered\nfriends}"];	
+	transporter [label = "{Transporter|deliveries\nmax-cargo\nladen-dist\nunladen-dist\nspeed\ndestination\nin-transit?}"];	
+	importer [label = "{Importer|name\nlocation\ncanget\nvolume}"];	
+	local_importer [label = "{Local Importer|name\nlocation\ncanget\nvolume\ncapacity}"];	
+	regulator [label = "{Regulator|location\npromoted\npenalised}"];        
+	# system actions
+	process [label = "{Process|name\ntime-taken\nprice}"];
+	metaprocess [label = "{Meta-Process|name\ntime-taken\nprice\nchanged\neffects}"];	
+	# resources
+	product [label = "{Product|product-type\namount\nshelf-life}"];	
+
+	## Reified relationships
+	node [fontsize = "12", style = "filled", fillcolor = "lightgrey"];
+	input [label = "{Input}"];
+	catalyst [label = "{Catalyst}"];
+	output [label = "{Output}"];
+	cargo [label = "{Cargo|address}"];
+	stock [label = "{Stock}"];
+
+	##Explicit relationships (arcs)	
+	processor -> process [label = "implement"];	
+	# process
+	process -> limit [label = "constraint"];
+	process -> yield [label = "uncertainty"];    
+	process -> metaprocess [label = "modification"];
+	regulator -> process [label = "control"];	
+	# resources 
+	processor -> input -> stock;
+	processor -> output -> stock; 
+	processor -> catalyst -> stock;
+	consumer -> stock;
+	stock -> product;
+	 
+	transporter -> cargo -> product;
+	processor -> processor [label = "trade"]
+	 
+	 
+	## Implicit relationships (implemented as procedures and/or attributes)	
+	edge [style = "dashed"];
+	# importer
+	importer -> product [label = "volume"];	
+	consumer -> importer [label = "supplier"];
+	processor -> importer [label = "supplier"];
+	local_importer -> product [label = "volume"];
+	local_importer -> processor [label = "supplier"];
+	local_importer -> consumer [label = "supplier"];
+	# consumer
+	consumer -> product [label = "demand\nunfulfilled-demand\nconsumed"];
+	consumer -> processor [label = "supplier"];
+	# processor
+	processor -> processor [label = "supplier"];
+	# locations
+	transporter -> patch [label = "(xcor,ycor)"];
+	processor -> patch [label = "(xcor,ycor)"];
+	consumer -> patch [label = "(xcor,ycor)"];
+	importer -> patch [label = "(xcor,ycor)"];
+	# space
+	patch -> region [label = "envelope", dir = "back", arrowtail = "vee"];
+	patch -> local_importer [label = "environment"];
+}

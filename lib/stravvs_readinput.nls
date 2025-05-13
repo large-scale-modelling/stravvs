@@ -1,0 +1,1040 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;        1         2         3         4         5         6          7         8
+;23456789012345678901234567890123456789012345678901234567890123445678901234567890
+;
+; STRAVVS Read from file
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; {any} file-error
+;
+; Give an error message
+
+to file-error [file-kind file-name line-number expecting found]
+  print (word "In " file-kind " file \"" file-name "\" (line number " line-number "): expecting " expecting ", but found \"" found "\"")
+  ifelse is-list? expecting [
+    set expecting (word "one of {\"" (reduce [[s n] -> (word s "\" \"" n)] expecting) "\"}")
+  ] [
+    set expecting (word "\"" expecting "\"")
+  ]
+  output-error (word "In " file-kind " file \"" file-name "\" (line number " line-number "): expecting " expecting ", but found \"" found "\"")
+end
+
+; is-first-alpha?() 
+; detect if start of string is a letter character
+to-report is-first-alpha? [str]
+  report is-string? str and (((first str) >= "a" and (first str) <= "z") or ((first str) >= "A" and (first str) <= "Z"))
+end
+
+; is-first-numeric?() 
+; detect if start of string is a number character
+to-report is-first-numeric? [str]
+  report is-number? str or ((first str) >= "0" and (first str) <= "9")
+end
+
+; is-first-alpha?() 
+; detect if start of string is a letter or number character
+to-report is-first-alphanumeric? [str]
+  report (is-first-alpha? str) or (is-first-numeric? str)
+end
+
+; read-effects-list () 
+; parse string into units and values for meta-processes
+to-report read-effects-list [tokens line-number]
+  let resource-list []
+  
+  while [length tokens > 0 and (is-first-alphanumeric? (first tokens) OR member? (first tokens) ["+=" "-=" "%"])] [
+    let distribution-attribute []
+    let product-name []
+    let direction []
+    let unit []
+    let quantity []
+    
+    ifelse member? first tokens ["m" "mu" "mean" "s" "sigma" "stddev" "standard-deviation" "v" "var" "sigma^2" "variance" "a" "alpha" "b" "beta"] [
+      set distribution-attribute first tokens    
+      set tokens but-first tokens
+    ][
+      error (word "expected distribution to be one of (m,mu,mean),(s,sigma,stddev,standard-deviation),(v,var,sigma^2,variance),(a,alpha),(b,beta) but got " first tokens)
+    ]
+        
+    ifelse member? first tokens table:keys product-values [
+      set product-name first tokens
+      set tokens but-first tokens
+    ][
+      error (word "expected distribution to be one of the products but got " first tokens)
+    ]
+    
+    ifelse member? first tokens ["+=" "-="] [
+      set direction first tokens
+      set tokens but-first tokens
+    ][
+      error (word "expected direction to be one of +=,-= but got " first tokens)
+    ]
+    
+    ifelse member? first tokens ["a" "abs" "absolute" "p" "pct" "percent" "%"] [
+      set unit first tokens
+      set tokens but-first tokens
+    ][
+      error (word "expected unit to be one of (a,abs,absolute),(p,pct,percent,%) but got " first tokens)
+    ]
+    
+    ifelse is-number? first tokens [
+      set quantity first tokens
+      set tokens but-first tokens
+    ][
+      error (word "expected quantity to be a number but got " first tokens)
+    ]
+    
+    set resource-list lput (list distribution-attribute product-name direction unit quantity) resource-list
+    
+    if first tokens = "+" AND NOT (first tokens = "+=" OR first tokens = "-=") [
+      set tokens but-first tokens
+    ]
+  ]
+  report (list resource-list tokens)
+end
+
+; read-resources-list ()
+; parse string into resources used by a process
+to-report read-resource-list [tokens line-number]
+  let resource-list []
+  
+  while [length tokens > 0 and is-first-alphanumeric? (first tokens)] [
+    let token first tokens
+    set tokens but-first tokens
+    
+    let n 0
+    let hasresource ""
+    ifelse is-number? token or is-first-numeric? token [
+      set n ifelse-value (is-number? token) [token] [read-from-string token]
+      ifelse is-first-alpha? first tokens [
+        set hasresource first tokens
+        set tokens but-first tokens
+      ] [
+        file-error "equation" equation-file line-number "a string beginning with an alphabetic character" (first tokens)
+      ]
+    ] [
+      set n 1
+      set hasresource token
+    ]
+    set resource-list lput (list n hasresource) resource-list
+    
+    if first tokens = "+" AND NOT (first tokens = "+=" OR first tokens = "-=") [
+      set tokens but-first tokens
+    ]
+  ]
+  
+  report (list resource-list tokens)
+end
+
+; read-yields()
+; read a file that describes how the yield of each process varies
+; this variability can be a function of patch constraints or just an inherent variability
+to read-yields
+  file-close-all
+  file-open yield-file  
+  let line-number 0
+  
+  set equation-yields table:make 
+  
+  while [ not file-at-end? ] [
+    let line file-read-line      ;; read the line into a string
+    set line-number line-number + 1
+    if is-first-alphanumeric? (first line) AND (first line) != "#" [ ; skip any comments
+      
+      let tokens filter [ s -> length (word s) > 0 ] (csv:from-row line ",")
+      let equation-name item 0 tokens      ; name is first item
+                                     ;string of <level/$variable><comparison><value>
+      let yield-equation filter [ s -> length (word s) > 0 ] (csv:from-row item 1 tokens " ")         
+      
+      let lvl-var item 0 yield-equation      
+      let lvl substring lvl-var 0 position "/" lvl-var
+      let var substring lvl-var (1 + position "/" lvl-var) length lvl-var
+      let cmp item 1 yield-equation
+      let val item 2 yield-equation
+      
+      let distribution-name item 2 tokens
+      let distribution-param item 3 tokens
+      
+      create-yields 1 [
+        set yield-name equation-name
+        set level lvl
+        set state-variable var
+        set op cmp
+        set value val
+        set distribution distribution-name
+        set dist-param (csv:from-row distribution-param " ")
+        set hidden? true               
+      ]           
+    ]
+  ]
+end
+
+; join-yields-processes()
+; creates an uncertainty link between a yield and a process
+to join-yields-processes
+  ask yields [   
+    let me yield-name
+    ifelse NOT any? processes with [name = me] [
+      error (word "Make a yield, but there is no process of this name: " me)
+    ][
+      create-uncertainty-to one-of processes with [name = me] [
+        set hidden? true
+      ]
+    ]
+  ]
+end
+
+; read-equations()
+; parse the input file of equations in the form of Extended Backus-Naur Form (EBNF) specification 
+; see Info for description
+to read-equations
+  file-close-all
+  file-open equation-file  ;"equations.txt" ;; default file name
+  let line-number 0
+  
+  ;; until CBR working use a simpler table
+  ;set global-case-base table:make
+  
+  while [ not file-at-end? ] [
+    let line file-read-line      ;; read the line into a string
+    set line-number line-number + 1
+   
+    if is-first-alphanumeric? (first line) AND (first line) != "#" [ ; skip any comments
+      
+      let tokens filter [ s -> length (word s) > 0 ] (csv:from-row line " ")
+      
+      let eq-name first tokens
+      if any? processes with [name = eq-name] [
+        file-error "equation" equation-file line-number "unique equation name" eq-name
+      ]      
+      set tokens but-first tokens
+      
+      if not member? first tokens [":" "!"] [
+        file-error "equation" equation-file line-number ": or !" (first tokens)
+      ]      
+      ; what type of equation
+      let eq-type first tokens ;is equation (:) or meta-equation (!)
+
+      set tokens but-first tokens
+      let other-equations []
+      if eq-type = "!" [        
+        ifelse first tokens = "(" [
+          set tokens but-first tokens
+          while [first tokens != ")"][
+            set other-equations lput first tokens other-equations
+            set tokens but-first tokens
+          ]
+          set tokens but-first tokens
+        ][
+          error (word "expected meta-equation to list other equations in ()")
+        ]
+      ]
+      
+      let resource-result read-resource-list tokens line-number
+      let input-list first resource-result
+      set tokens last resource-result
+      
+      let cata-list []
+      
+      (ifelse first tokens = "-[" [
+        set tokens but-first tokens
+        set resource-result read-resource-list tokens line-number
+        set cata-list first resource-result
+        set tokens last resource-result
+        ifelse first tokens = "]>" [
+          set tokens but-first tokens
+        ] [
+          file-error "equation" equation-file line-number "]>" (first tokens)
+        ]
+      ] first tokens = "->" or first tokens = ">" [
+        set tokens but-first tokens
+      ] [
+        file-error "equation" equation-file line-number ["-[" "->" ">"] (first tokens)
+      ])
+      
+      ; make a table of catalysts & amounts
+      let catalyst-table table:make
+      ifelse length cata-list > 0 [
+        foreach cata-list [x ->
+          table:put catalyst-table item 1 x item 0 x
+        ]
+      ] [
+        table:put catalyst-table "" 0
+      ]
+           
+      ifelse eq-type = ":" [
+        set resource-result read-resource-list tokens line-number
+      ][
+        set resource-result read-effects-list tokens line-number
+      ]
+      
+      let output-list first resource-result      
+      set tokens last resource-result
+      
+      ; Pull out the time taken (it will be treated as optional)
+      
+      let the-time-taken 1
+      let time-units tick-unit
+      ifelse length tokens >= 3 and first tokens = "|" [
+        let tt item 1 tokens
+        set the-time-taken ifelse-value (is-number? tt) [tt] [read-from-string tt]
+        set time-units item 2 tokens
+        
+        if last time-units = "s" [
+          set time-units but-last time-units
+        ]
+        if not member? time-units [ "day" "week" "month" "year" ] [
+          file-error "equation" equation-file line-number [ "day" "week" "month" "year" ] time-units
+        ]
+        set tokens but-first but-first but-first tokens
+      ] [
+        if length tokens > 0 [
+          ifelse first tokens != "|" [
+            file-error "equation" equation-file line-number "|" (first tokens)
+          ] [
+            output-error (word "In equation file \"" equation-file "\" (line number " line-number
+              "): expecting a time specifier after \"|\" in two words, but only got " ((length tokens) - 1))
+          ]
+        ]
+      ]
+      
+      let limit-list []      
+      
+      if length tokens >= 4 [
+        (ifelse first tokens = "|" [
+          set tokens fput "&" but-first tokens
+          while [length tokens >= 4 and first tokens = "&"] [
+            let lvl-var item 1 tokens
+            let cmp item 2 tokens
+            let val item 3 tokens
+            
+            if not member? "/" lvl-var [
+              file-error "equation" equation-file line-number "<level>/<variable>" lvl-var
+            ]
+            
+            let lvl substring lvl-var 0 position "/" lvl-var
+            if not member? lvl [ "global" "regional" "local" "patch" ] [
+              file-error "equation" equation-file line-number [ "global" "regional" "local" "patch" ] lvl
+            ]
+            
+            let var substring lvl-var (1 + position "/" lvl-var) length lvl-var
+            
+            if first var = "$" and not member? var [ "$ticks" "$months" "$procs" "$stocks" "$orders" "$stock-amounts" ] [
+              file-error "equation" equation-file line-number [ "$ticks" "$months" "$procs" "$stocks" "$orders" "$stock-amounts" ] var
+            ]
+            
+            if not member? cmp [ "=" "!=" "<" "<=" ">" ">=" "in" "!in" ] [
+              file-error "equation" equation-file line-number [ "=" "!=" "<" "<=" ">" ">=" "in" "!in" ] cmp
+            ]
+            
+            set tokens but-first but-first but-first but-first tokens
+            if val = "{" [
+              set val []
+              while [ length tokens > 0 and first tokens != "}" ] [
+                set val lput val (first tokens)
+                set tokens but-first tokens
+              ]
+              if length tokens = 0 [
+                file-error "equation" equation-file line-number "}" "end-of-line"
+              ]
+              set tokens but-first tokens
+            ]
+            
+            set limit-list lput (list lvl var cmp val) limit-list
+          ]
+        ] [
+          output-error (word "In equation file \"" equation-file "\" (line number " line-number
+            "): expecting a constraint specifier after \"|\" in at least three words, but only got " ((length tokens) - 1))
+        ])
+      ]
+      
+      let yield-list []
+      
+      
+      if length tokens > 1 [
+        (ifelse first tokens = "|" [
+          set tokens fput "&" but-first tokens        
+          while [length tokens > 1 and first tokens = "&"] [
+            let lvl-var2 item 1 tokens
+            
+            if not member? "/" lvl-var2 [
+              file-error "equation" equation-file line-number "<level>/<variable>" lvl-var2
+            ]
+            
+            let lvl2 substring lvl-var2 0 position "/" lvl-var2
+            if not member? lvl2 [ "global" "regional" "local" "patch" ] [
+              file-error "equation" equation-file line-number [ "global" "regional" "local" "patch" ] lvl2
+            ]
+            
+            let var2 substring lvl-var2 (1 + position "/" lvl-var2) length lvl-var2          
+            if first var2 = "$" and not member? var2 [ "$lca" "$habit" "$months" ] [
+              file-error "equation" equation-file line-number [ "$lca" "$habit" "$months" ] var2
+            ]
+            
+            set tokens but-first but-first tokens
+            
+            set yield-list lput (list lvl2 var2) yield-list
+          ]
+        ][
+          output-error (word "In equation file \"" equation-file "\" (line number " line-number
+            "): expecting a yield specifier after \"|\" in at least one words, but only got " ((length tokens) - 1))
+        ])
+      ]
+      
+      if length tokens > 0 [
+        ifelse first tokens != "|" [
+          file-error "equation" equation-file line-number "|" (first tokens)
+        ] [
+          output-error (word "In equation file \"" equation-file "\" (line number " line-number
+            "): expecting a constraint or yield specifier after \"|\" but only got " ((length tokens) - 1))
+        ]
+      ]
+      
+      ; convert time taken to tick units
+      let time-taken-std convert-time the-time-taken time-units
+      
+      
+      ifelse eq-type = ":" [
+        ; hatch a process for each equation
+        create-processes 1 [
+          set name eq-name
+          set time-taken time-taken-std
+          set hidden? true
+          
+          ; link each process back to the inputs & outputs
+          
+          foreach input-list [ x ->
+            let the-input generate-components (last x) (first x) ;"ingredient"
+            
+            create-input-from the-input [
+              set label (first x)
+              set hidden? true
+            ]
+          ]
+          
+          foreach cata-list [ x ->
+            let the-catalyst generate-components (last x) (first x) ;"catalyst"
+            
+            create-catalyst-from the-catalyst [
+              set label (first x)
+              set hidden? true
+            ]
+          ]
+          
+          foreach output-list [ x ->
+            let the-output generate-components (last x) (first x) ;"outcome"
+            
+            create-output-to the-output [
+              set label (first x)
+              set hidden? true
+            ]
+          ]
+          
+          foreach limit-list [ x ->
+            let the-limit nobody
+            
+            hatch-limits 1 [
+              set level item 0 x
+              set state-variable item 1 x
+              set op item 2 x
+              set value item 3 x
+              
+              set hidden? true
+              
+              set the-limit self
+            ]
+            
+            create-constraint-to the-limit [
+              set hidden? true
+            ]
+          ]
+        ]
+      ][
+        create-metaprocesses 1 [
+          set name eq-name
+          set time-taken time-taken-std
+          set effects table:make ;list of products changed
+          set changed other-equations ;list of processes effected
+          set hidden? true
+                             
+          foreach input-list [ x ->
+            let the-input generate-components (last x) (first x) ;"ingredient"
+            
+            create-input-from the-input [
+              set label (first x)
+              set hidden? true
+            ]
+          ]
+          
+          foreach cata-list [ x ->
+            let the-catalyst generate-components (last x) (first x) ;"catalyst"
+            
+            create-catalyst-from the-catalyst [
+              set label (first x)
+              set hidden? true
+            ]
+          ]
+                    
+          foreach output-list [ x ->
+            if NOT table:has-key? effects item 1 x [
+              table:put effects item 1 x 0
+            ]  
+            table:put effects (item 1 x) x            
+          ]
+          
+          foreach limit-list [ x ->
+            let the-limit nobody
+            
+            hatch-limits 1 [
+              set level item 0 x
+              set state-variable item 1 x
+              set op item 2 x
+              set value item 3 x
+              
+              set hidden? true
+              
+              set the-limit self
+            ]
+            
+            create-constraint-to the-limit [
+              set hidden? true
+            ]
+          ]
+        ]
+      ]
+    ]; end if alpha numeric
+  ] ;end while-loop
+  
+  print-progress (word "Read " line-number " lines from \"" equation-file "\" and created " (count processes)
+    " processes, " (count inputs) " inputs, " (count catalysts) " catalysts, and " (count outputs) " outputs")
+  
+  file-close
+end
+
+; {} join-meta-equations
+; link meta-equations to their respective equations
+to join-meta-equations
+  ask metaprocesses [
+    ;print effects
+    foreach changed [x ->          
+      ; find matches
+      let any-matches match-text x [name] of processes
+      if any-matches != FALSE [
+        foreach any-matches [ y ->
+      create-modification-to one-of processes with [name = y]
+        ]
+      ]
+    ]
+  ]
+end
+
+
+; {process} generate-components
+;
+; hatch the inputs/outputs from each equation
+; products are coded as agents based on their type and units
+to-report generate-components [ component-type quantity]
+  let component nobody
+  
+  hatch-products 1 [
+    set size patch-size / 80
+    set product-type component-type
+    set amount quantity
+    set shelflife "archetype"
+    set hidden? true
+    set component self
+  ]
+  
+  report component
+end
+
+
+
+;; function to read and parse equation agents file
+; agents are of the form:
+; processor, x, y, equation_name, *, resouce quantity
+; consumer, x, y, product_type
+; importer, x, y,
+; transporter, x, y, max_capacity
+; using white space separators
+; "equation_name" is used to identify which equation is used by a process/-or
+; if "type":
+; - is processor, thenidentify the equation_name used
+; - is a consumer then the product_type demanded is used
+; - is an importer then the 4th entry is ignored
+; - is a transporter then the 4th entry is the carrying capacity
+to read-agents [ file-name file-kind ]
+  file-open file-name
+  
+  let line-number 0
+  while [ not file-at-end? ] [
+    let line file-read-line      ;; read the line into a string
+    set line-number line-number + 1
+    let data csv:from-row line
+        
+    ;; hatch a new processor
+    if file-kind = "processor" [
+      create-processors 1 [
+        set shape "factory"
+        ;set xcor item 0 data ;x coordinate
+        ;set ycor item 1 data ;y coordinate
+        coordinates data
+        set size 0.2
+        set orders table:make
+        set ordered table:make
+        set friends nobody
+        ;set resources table:make
+        set capacity table:make 
+        ;let balance 0
+        set dormant 0
+        set long-dormant 0
+        set closed FALSE
+        
+        ifelse use-region-file? [
+          ; remove a single "region" coordinate
+          set data but-first data
+        ][
+          ; remove two x & y coordinates
+          set data but-first but-first data
+        ]
+        
+        set running table:make
+        ;set processor-region one-of regions ; TO-DO populate this from the file!
+        set local-state table:make
+        
+        ; allow arbitrary number of processes per processor
+        if length data = 0 [
+          file-error file-kind file-name line-number "at least one process" "no processes listed"
+        ]
+        
+        let what "equations"
+        let all-equations []
+        while [ length data > 0] [
+          let thing first data  ; first item of data vector
+                                ;print (word "got to " thing)
+          
+          ifelse (first thing) = "*" [
+            set what "resources"
+            set data but-first data ;remove * divider
+          ][
+            ifelse (what = "equations") [
+              ;; list equations
+              set all-equations lput first data all-equations
+              set data but-first data ; remove equation from the data string
+              
+            ]  [  ;if (what != "equations" --> switch to resources
+              set data but-first data
+              let tokens filter [ s -> length (word s) > 0 ] (csv:from-row thing " ")              
+              if last tokens > 0 [
+                ;; BEN ;;
+                ; hatch all the catalysts
+                hatch-products 1[
+                  set product-type (first tokens)
+                  set amount (last tokens)
+                  set size patch-size / 80
+                  set shape "box"
+                  set hidden? true
+                  ;set role "catalyst"
+                  create-stock-from myself
+                ]
+              ]
+            ]
+          ]
+        ] ;end while length data > 0
+        
+        ; gather up all the equations in the processor file
+        let procs "error"
+        
+        ; count of equations                     
+        let J length all-equations
+        if J = 0 [
+          file-error file-kind file-name line-number "equation or 'unknown'" all-equations
+        ]
+        if item 0 all-equations = "unknown" [
+          ; if the equation is unknown,
+;          set all-equations [name] of choose-process "all-random"
+;          set-processes "global" false          
+;          set all-equations table:keys capacity
+          set J 0 ; length all-equations
+        ]
+        ; loop through equations
+        if J > 0 [
+          foreach all-equations [ x ->
+            (ifelse any? processes with [name = x] [
+              create-implement-to one-of processes with [name = x] [
+                set hidden? TRUE
+                set color green
+              ]
+            ] any? metaprocesses with [name = x] [
+              create-implement-to one-of metaprocesses with [name = x] [
+                set hidden? TRUE
+                set color green
+              ]
+            ][
+              error (word "can't create an implement to a process or metaprocess with name " x)
+              ])
+          ]
+        ]
+      ]
+    ]
+    
+    ; hatch a new consumer
+    if file-kind = "consumer" [
+      create-consumers 1 [
+        set shape "person"
+        ;set xcor item 0 data ;x coordinate
+        ;set ycor item 1 data ;y coordinate
+        coordinates data
+        set size 0.2
+        set demand table:make
+        set consumption table:make
+        set unfulfilled-demand table:make
+        set ordered table:make
+        set friends nobody
+        
+        ifelse use-region-file? [
+          ; remove a single "region" coordinate
+          set data but-first data
+        ][
+          ; remove a two x & y coordinates
+          set data but-first but-first data
+        ]
+        if length data = 0 [
+          file-error file-kind file-name line-number "at least one product" "no products"
+        ]
+        
+        ; allow arbitrary number of demands per consumer, with optional numbers
+        while [ length data > 0 ] [
+          let n 1
+          let x first data ;take amount-product pair (or just product if no amount)
+          
+          let tokens filter [ s -> length (word s) > 0 ] (csv:from-row x " ") ; find where the white spaces are
+          if is-first-numeric? item 0 tokens [ ;is first part a number?
+                                               ; parse number of string
+            ifelse is-number? item 0 tokens [
+              set n item 0 tokens ][
+              set n read-from-string item 0 tokens
+            ]
+            if length tokens = 0 [
+              file-error file-kind file-name line-number (word "a product name after volume " n) "nothing"
+            ]
+            
+            ; tidy up token to remove n and change back into a string (from a list)
+            set tokens but-first tokens  ; remove n
+          ]
+          
+          set tokens item 0 tokens
+           if not member? tokens table:keys product-values [
+            file-error file-kind file-name line-number table:keys product-values tokens
+          ]
+          table:put demand tokens n
+          set data but-first data
+        ]
+      ]
+    ]
+    
+    ; hatch a new importer
+    if file-kind = "importer" [
+      create-importers 1 [
+        set shape "boat"
+        ;set xcor item 0 data ;x coordinate
+        ;set ycor item 1 data ;y coordinate
+        coordinates data
+        set size 0.2
+        set volume table:make
+      ]
+    ]
+    
+    ; hatch transporters
+    if file-kind = "transporter" [
+      create-transporters 1 [
+        set shape "truck"
+        ;set xcor item 0 data ;x coordinate
+        ;set ycor item 1 data ;y coordinate
+        coordinates data
+        ifelse use-region-file? [
+          ; remove a single "region" coordinate
+          set data but-first data
+        ][
+          ; remove a two x & y coordinates
+          set data but-first but-first data
+          ; report error if no other data exist (i.e. for cargo)
+          if length data <= 0 [file-error file-kind file-name line-number "expected another value for transporter cargo" "nothing"]
+        ]
+        set size 0.1
+        set laden-distance 0
+        set unladen-distance 0
+        set speed 2
+        set max-cargo item 0 data ;number of product units
+        set destination nobody
+        set deliveries []
+        set in-transit? false
+        set hidden? instant-transport?
+      ]
+    ]
+    
+    
+    ; hatch a new regulator
+    if file-kind = "regulator" [
+      create-regulators 1 [
+        set shape "star"
+        ;set xcor item 0 data ;x coordinate
+        ;set ycor item 1 data ;y coordinate
+        coordinates data
+        set size 0.2        
+        set promoted table:make; table of product names and subsidy value        
+                               ;; not currently used
+        set penalised table:make; table of product names and subsidy value
+        
+        ifelse use-region-file? [
+          ; remove a single "region" coordinate
+          set data but-first data
+        ][
+          ; remove a two x & y coordinates
+          set data but-first but-first data
+        ]
+        if length data = 0 [
+          file-error file-kind file-name line-number "at least one product" "no products"
+        ]
+        
+        ; allow arbitrary number of products promoted per consumer, with non-optional subsidy        
+        while [ length data > 0 ] [
+          let n 1
+          let x first data ;take amount-product pair (or just product if no amount)
+          
+          let tokens filter [ s -> length (word s) > 0 ] (csv:from-row x " ") ; find where the white spaces are
+          
+          if is-first-numeric? item 1 tokens [ ;is second part a number?
+                                               ; parse number of string
+            ifelse is-number? item 1 tokens [
+              set n item 1 tokens ][
+              set n read-from-string item 1 tokens
+            ]
+            if length tokens = 0 [
+              file-error file-kind file-name line-number (word n "a subsidy amount after product name") "nothing"
+            ]
+            
+            ; tidy up token to remove n and change back into a string (from a list)
+            set tokens but-last tokens  ; remove n
+          ]
+          
+          set tokens item 0 tokens
+          if not member? tokens table:keys product-values [
+            file-error file-kind file-name line-number table:keys product-values tokens
+          ]
+          table:put promoted tokens n
+          set data but-first data
+        ]
+      ]
+    ]
+    
+  ]
+  print-progress (word "Read " line-number " lines of data from \"" file-name "\" and now there are "
+    (count processors) " processors, " (count consumers) " consumers, " (count importers)
+    " importers, " (count transporters) " transporters, and " (count regulators) " regulators")
+end
+
+
+
+;; read-series
+;
+; this should read a timeseries of consumer demans
+; it doesn't seem to work well since there is no time in the file, but rows
+; correspond to ticks
+to read-series[ file-name ]
+  file-open file-name
+  set consumer-timeseries []
+  set consumer-header []
+  
+  let line-number 0
+  while [ not file-at-end? ] [
+    let line file-read-line      ;; read the line into a string  
+    
+    (ifelse empty? line [ 
+      ; put demand to nothing
+      set line-number line-number + 1
+      set consumer-timeseries lput ([]) consumer-timeseries
+    ]  is-first-alphanumeric? (first line) [    
+      set line-number line-number + 1
+      let data csv:from-row line
+      set consumer-timeseries lput (data) consumer-timeseries
+      ;    ]
+    ] (first line) = "#" [
+      ; skip any comments
+    ])
+  ]
+end
+
+;; make transport
+;
+; make a single transporter
+to make-transporter
+  create-transporters 1 [
+    set shape "truck"
+    setxy 0 0
+    set size 0.1
+    set laden-distance 0
+    set unladen-distance 0
+    set speed 2
+    set max-cargo 1000
+    set destination nobody
+    set deliveries []
+    set in-transit? false
+    set hidden? FALSE
+  ]
+end
+
+
+;; Read products
+;
+; CSV file of product name , price, shelflife....
+to read-products [ file-name ]
+  set product-values table:make
+  
+  file-open file-name
+  
+  let line-number 0
+  while [ not file-at-end? ] [
+    let line file-read-line      ;; read the line into a string
+    set line-number line-number + 1
+    if NOT (empty? line) AND is-first-alphanumeric? (first line) AND (first line) != "#" [
+      let data csv:from-row line
+      let product-key item 0 data
+      let product-price item 1 data
+      let product-shelf item 2 data
+      (ifelse (NOT is-number? product-price) OR (NOT is-number? product-shelf) [
+        if (NOT is-number? product-price) [ print (word product-key " price to blame? " product-price) ]
+        if (NOT is-number? product-shelf) [ print (word product-key " shelflife to blame? " product-shelf) ]
+        error (word "read-products expected numeric prices and shelflives, but got " product-key " " product-price " " product-shelf)
+      ][
+        table:put product-values product-key (list product-price product-shelf)
+      ])
+      
+    ]
+  ]
+  print-progress (word "Read " line-number " lines of data from \"" file-name "\" and now there are "
+    (table:length product-values) " products")
+end
+
+
+;; standardise time units
+to-report convert-time [t unit]
+  ; list of time unit options
+  let options ["days" "weeks" "months" "years"]
+  
+  ; make '2D' nested list with 1stD = time_unit & 2ndD = unit
+  let _time (list [1 7 30 365] (list (1 / 7) 1 4 52) (list (1 / 30) (1 / 4) 1 12) (list (1 / 365) (1 / 52) (1 / 12) 1))
+  
+  ; This option is more 'ontologically consistent', but has 13 months per year.
+  ;let _time (list [ 1 7 28 364 ] (list (1 / 7) 1 4 52 ) (list (1 / 28) (1 / 4) 1 13 ) (list (1 / 364) (1 / 52) (1 / 13) 1) )
+  
+  ; index time for 2D conversion matrix
+  let i position tick-unit options
+  let j position (remove "s" unit) map [k -> remove "s" k] options
+  ; remove plurals for disambiguation -- assumes time units don't have an 's' other than as plural
+  ; (WARNING: don't use this with seconds as time units!)
+  
+  ; get conversion factor
+  let _convert item j item i _time
+  
+  ; report standardised units
+  ;report round t * _convert
+  ;; BEN ;; ceiling time so that can't run multiple times if time step < equation runtime
+  report ceiling t * _convert
+end
+
+
+;; either read coordinates from agent-file or randomly generate from region
+to coordinates [token]
+  ifelse use-region-file? [
+    let loc [0 0]
+    carefully [
+      ;print item 0 token
+      let place (gis:find-one-feature region-map "NAME" (item 0 token))
+      ifelse NOT (place = nobody) [
+        set loc gis:location-of gis:random-point-inside place
+      ][
+        error (word "Expected the NAME of a polygon, but got <" (item 0 token) "> instead")
+      ]
+      
+    ] [
+      print error-message
+    ]
+    
+    
+    setxy (item 0 loc) (item 1 loc)
+    set location item 0 token
+  ][
+    setxy (item 0 token) (item 1 token)
+    set location "global"
+  ]
+end
+
+; check that all products in the equations are in the product attribute files
+; note: not all products will have an entry in the yields file if they do not (need) variable 
+; output (e.g. they are catalysts or only inputs)
+to check-products
+  let types table:keys product-types
+  let values table:keys product-values
+  
+let a (table:keys product-types)
+let b (table:keys product-values)
+let types-on-values (filter [i -> NOT member? i values ] types)
+let values-on-types (filter [i -> NOT member? i types ] values)
+  
+  if length types-on-values > 0 [
+    error (word "Some products are in the product-types that are not in the product-values: " types-on-values)
+  ]
+
+  ;;   the reverse probably doesn't matter as these are available to equations even if not currently used
+;  if length values-on-types > 0 [
+;    error (word "Some products are in the product-values that are not in the product-types: " values-on-types)
+;  ]
+
+end
+
+; determine if sub-string is within larger string
+to-report match-text [sub strings]
+  ; find any *
+  let rem (position "*" sub)
+  let begins-with? FALSE
+  let ends-with? FALSE
+  let anywhere-with? FALSE
+  let exact-with? FALSE
+  
+  ; strip out any * and record their location (beginning*, *end or *both*)
+  ifelse rem = FALSE [
+    set exact-with? TRUE
+  ][
+    while [rem != FALSE] [
+      let loc position "*" sub
+      if loc = 0 [ set ends-with? TRUE]
+      if loc = length sub - 1[ set begins-with? TRUE]
+      set sub remove-item loc sub
+      set rem (position "*" sub)
+    ]
+    ; more than one wildcard - match anywhere
+    if begins-with? = TRUE AND ends-with? = TRUE [
+      set anywhere-with? TRUE    
+    ]
+  ]
+  
+  ;print (word "Looking at begining " begins-with? ", ending " ends-with? ", exact " exact-with? " or anywhere " anywhere-with?) 
+  let keep []
+  foreach strings [ x ->
+    if position sub x != FALSE [
+      (ifelse exact-with? = TRUE AND (position sub x = 0 AND length x = length sub) [ ;exact match only
+        set keep lput x keep
+      ] begins-with? = TRUE AND position sub x = 0 [
+        set keep lput x keep
+      ] ends-with? = TRUE AND ((position sub x + length sub) = length x)[
+        set keep lput x keep
+        ] anywhere-with? = TRUE [
+          set keep lput x keep
+      ][        
+        ;no match, don't append to list
+      ])      
+    ]
+  ]
+  report keep
+end

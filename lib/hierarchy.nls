@@ -1,0 +1,54 @@
+
+to-report catalyst-similarity
+  let pairdist []
+  
+  ask processes [
+    let X (sentence [product-type] of in-catalyst-neighbors)
+   ;list my catalysts
+     ask other processes [
+      ; list their catalysts
+      let Y (sentence [product-type] of in-catalyst-neighbors)
+      
+      set pairdist lput (list [name] of self [name] of myself dice-distance X Y ) pairdist
+    ] 
+  ]
+  report pairdist
+end
+
+; unit scale of similarity - basis of Gower distance
+; https://medium.com/analytics-vidhya/gowers-distance-899f9c4bd553
+to-report dice-distance [X Y]
+  ;let keysX table:keys X
+  ;let keysY table:keys Y
+  
+  ; dimensions
+  let D remove-duplicates (sentence X Y)
+  ;print (word "D = " D)
+  
+  let N length D ; total number of dimensions
+  let NTT 0; dimensions both true
+  let NTF 0; dimensions in X but not Y
+  let NFT 0; dimensions in Y but not X
+  let NFF 0; dimensions both false
+  
+  foreach D [ i ->
+    
+    ;print (word i ":  X - " keysX "  | Y - " keysY)
+    ;print (word "i = " i)
+    if member? i X AND member? i Y [ set NTT NTT + 1]  
+    if member? i X AND NOT member? i Y [ set NTF NTF + 1]  
+    if NOT member? i X AND member? i Y [ set NFT NFT + 1]         
+  ]
+  let NNEQ NTF + NFT ; non-equal dimensions
+  let NNZ NTF + NFT + NTT ; non-zero dimensions
+  
+  let dice 0
+  if NTT + NNZ > 0 [
+    set dice  NNEQ / (NTT + NNZ)
+  ]  
+  
+  ; if they are equal, dice = 0, if completely different dice = 1
+  report dice  
+end
+
+
