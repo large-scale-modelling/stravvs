@@ -1,0 +1,15 @@
+cff-version: 1.1.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "McCormick"
+    given-names: "Ben"
+    orcid: "https://orcid.org/0000-0002-8060-0502"
+  - family-names: "Roxburgh"
+    given-names: "Nick"
+    orcid: "https://orcid.org/0000-0002-7821-1831"
+  - family-names: "Polhill"
+    given-names: "Gary"
+    orcid: "https://orcid.org/0000-0002-8596-0590"
+title: "STRAVVS Agent-Based Model of Resource Flows in Value Chains"
+version: v1.0
+date-released: 2025-05-15
