@@ -1,4 +1,4 @@
-cff-version: 1.1.0
+cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 authors:
   - family-names: "McCormick"
@@ -11,5 +11,8 @@ authors:
     given-names: "Gary"
     orcid: "https://orcid.org/0000-0002-8596-0590"
 title: "STRAVVS: A flexible agent-based modelling framework for simulating dynamic value chain networks"
-version: v2.0
+version: 2.0.1
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.22772889
 date-released: 2026-09-15
