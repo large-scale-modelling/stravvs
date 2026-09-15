@@ -1,4 +1,18 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v0.1, 14th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Compute distances
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; {} catalyst-similarity
+; calculated catalyst dissimilarity distance between pairs of processes
 to-report catalyst-similarity
   let pairdist []
   
@@ -15,6 +29,7 @@ to-report catalyst-similarity
   report pairdist
 end
 
+; {} dice-distance
 ; unit scale of similarity - basis of Gower distance
 ; https://medium.com/analytics-vidhya/gowers-distance-899f9c4bd553
 to-report dice-distance [X Y]

@@ -1,16 +1,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
+;
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v0.1, 14th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ; STRAVVS procedures
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; {consumer, processor} make-orders
-;
 ; Consumers order the goods they demand; Processors order goods they need to run
 ; the Processes they implement.
 to make-orders
-  
   (ifelse is-consumer? self [
     foreach table:keys demand [ good ->      
       let the-amount table:get demand good     
@@ -20,12 +24,13 @@ to make-orders
       let all-suppliers suppliers-of good
       ; loop through all the suppliers until the amount it met or orders have been placed with all suppliers 
       while [(the-amount > 0) AND (count all-suppliers > 0 )][
+        
         ; get this supplier
         let this-supplier one-of all-suppliers
 
         ; see how much they can make
         let supplier-capacity ([get-capacity-product good] of this-supplier) * ([amount] of one-of products with [product-type = good AND shelflife = "archetype"])
-       
+        
         ifelse supplier-capacity >= the-amount [ ;can supply the whole lot?
           ask this-supplier [
             supply the-customer good the-amount FALSE
@@ -48,7 +53,7 @@ to make-orders
               set the-amount (the-amount - supplier-capacity)
             ][
               ; supply what was asked for - and ramp up supply
-              supply the-customer good the-amount FALSE
+              supply the-customer good supplier-capacity FALSE
               if verbose? [print (sentence "MAKE-ORDERS Consumer asked " self " for partially supply " the-amount " of " good)]
               ;; note that it has been ordered
               ask the-customer [just-ordered supplier-capacity good this-supplier]
@@ -61,6 +66,7 @@ to make-orders
       ] ;end while
       
       
+      
       ; tabulate the demand that has been met
       set the-amount (table:get demand good - the-amount)
       if not table:has-key? unfulfilled-demand good [
@@ -69,7 +75,7 @@ to make-orders
       table:put unfulfilled-demand good the-amount + (table:get unfulfilled-demand good)
       
       ;update orders table on how much was ordered, not what remained
-      order-status things-ordered good the-amount
+      order-status things-ordered good the-amount      
     ] ; if empty ordered
     
     
@@ -108,7 +114,6 @@ to make-orders
 end
 
 ; {processor} make-goods
-;
 ; If there are stocks in place that mean processes can be run, then run
 ; those processes
 to make-goods
@@ -120,12 +125,12 @@ to make-goods
         let time-left item 3 y
         let amount-needed item 2 y
         
-        if time-left = 0 [
-          ask out-implement-neighbors [ ;process
+        if time-left <= 0 [
+          ask out-implement-neighbors with [can-process? the-processor] [ ;process            
                                         ; make note of equation being run
             let the-process [name] of self ;name of process
                                            ;print the-process
-            
+                                    
             if NOT table:has-key? things-run [name] of self [
               table:put things-run [name] of self 0
             ]
@@ -134,7 +139,8 @@ to make-goods
             let makers out-output-neighbors with [product-type = x]
             test "make-goods" " " "anybody" makers []
             let the-amount 0
-            ask makers[ ;product
+
+            ask makers [ ;product
               hatch-products 1 [
                 set product-type [product-type] of self                
                 test "make-goods" "hatch" "equals" product-type x
@@ -195,23 +201,6 @@ to make-goods
                 order-status things-made ([product-type] of self) ([amount] of self) 
                 output-update output-made ([product-type] of self) ([amount] of self)
               ]
-              
-              ; check if there are any promoted goods (control = link regulator -> process)
-              ;(if count controls > 0 [
-              ;              ask the-processor [
-              ;                ; ask regulator to add to the budget of the processor
-              ;                let subsidy get-subsidy x
-              ;                let unit-cost (item 0 table:get product-values x)
-              ;                let full-cost the-amount * ( subsidy + unit-cost )
-              ;                ;print (sentence the-processor " make goods : " budget " + " full-cost) 
-              ;                
-              ;                ;print (word "adding " get-subsidy [product-type] of myself " to budget of " the-processor)                
-              ;                set budget budget  + full-cost
-              ;                
-              ;                ;; record income from the current process (add to current amount in case runs more than once)
-              ;                table:put running the-process (ifelse-value table:has-key? running the-process [table:get running the-process][0]) + full-cost
-              ;              ]
-              ;])              
             ]
             ;; tabulate equation use            
             output-update output-equation ([name] of self) 1
@@ -232,143 +221,67 @@ to satisfied-order
   ]
 end
 
-
-;{process} any-modifications?
-;ask if the processor has any metaprocesses
-to-report any-modifications? [ask-me]
-  let result FALSE
-  if any? my-modifications [
-    set result TRUE
-  ]
-  report result
-end
-
-; {process} equation-modification
-; ask the-process if it shares a meta-process with the-processor and therefore
-; if products need to be adjusted. Return the a specified amount. 
-to-report modified [the-processor]
-  let amendment table:make
-  let the-process self  
-  
-  ; does the equation have any modifications?
-  if any? my-modifications [       ; going to look for [other-end = the-processor]
-    ask my-modifications [         ; if yes...
-      ask other-end [              ; check whether the same modification is ALSO attached to the processor        
-        test "modified" " " "member" self metaprocesses 
-        if any? my-implements with [other-end = the-processor] [          
-          set amendment copy-table effects
-        ]
-      ]
+; {importer, processor} supply
+; Receive a request to supply some goods. Processors just note this down
+; on their orders list; importers create the goods and send them for
+; delivery to the customer.
+to supply [ customer good the-amount restock?]  
+  (ifelse is-processor? self [
+    let time-needed time-to-make good
+    ;print (sentence "SUPPLY " self " to " customer " " the-amount " of " good)     
+    let the-order (list customer good the-amount time-needed false)    
+    if not table:has-key? orders good [
+      table:put orders good []
     ]
-  ]
-  report amendment
-end
-
-; {process} equation-modification
-; If a process is modified by a metaprocess, return the a modified amount of the-good. 
-to-report modified-amount [the-good the-type amendment]
-  let new-amount 0
-  
-  ifelse NOT table:has-key? amendment the-good [
-    error (word "modified product not in table of modifications")
-  ][
+    table:put orders good (lput the-order table:get orders good)    
     
-    (ifelse the-type = "input" [
-      ask in-input-neighbors [
-        (ifelse member? product-type table:keys amendment [          
-          set new-amount (tweak-equation amount table:get amendment product-type)
-          ;print (word "amended amount of " product-type " to " new-amount)
-        ][          
-          set new-amount amount
-          ;print (word "amount of " product-type " stayed the same - " amount)
-        ])
-      ] 
-    ] the-type = "catalyst" [
-      ask in-catalyst-neighbors [
-        (ifelse member? product-type table:keys amendment [
-          ;set cat-things (sentence cat-things (tweak-equation amount table:get amendment product-type) product-type)
-          set new-amount (tweak-equation amount table:get amendment product-type)
-        ][
-          ;set cat-things (sentence cat-things amount product-type)
-          set new-amount amount
-        ])
-        
-      ]
-    ] the-type = "output" [
-      ask out-output-neighbors [
-        (ifelse member? product-type table:keys amendment [
-          ;set out-things (sentence out-things (tweak-equation amount table:get amendment product-type) product-type)
-          set new-amount (tweak-equation amount table:get amendment product-type)
-        ][
-          ;set out-things (sentence out-things amount product-type)
-          set new-amount amount
-        ])
-      ]
-    ][
-      error (word "Asked to modify an unknown product type - expected input/catalyst/output but got " the-type)
-    ])
-    report new-amount
+    ;; add cost to supplier
+    let before budget
+    pay self "add" good the-amount
+    let after budget    
+  ] is-importer? self OR is-local-importer? self [
+    if not table:has-key? volume good [
+      table:put volume good 0
+    ]
+    table:put volume good (the-amount + table:get volume good)
+    if NOT restock? [
+      order-status things-imported good the-amount
+    ]
+    
+    let the-product nobody
+    hatch-products 1 [
+      set size patch-size / 80
+      set product-type good
+      set amount the-amount
+      if verbose? [print (sentence "SUPPLY new product of " the-amount " of " good)      ]
+      set shelflife item 1 table:get product-values good
+      set shape "box"
+      set heading random 360
+      set color table:get product-colour good
+      fd 1
+      set the-product self
+      set hidden? FALSE
+    ]
+    
+    ;; tabulate product use
+    output-update output-imported (good) (the-amount)
+    
+    ask choose-transporter [
+      deliver the-product myself customer
+    ]
+  ][
+    error (word "Turtle " who ", breed " breed " cannot supply a good")
+  ])
+  
+  ;; deduct cost from customer
+  if is-processor? customer [
+    let before [budget] of customer
+    pay customer "minus" good the-amount
+    let after [budget] of customer
   ]
 end
-
-; {} tweak-equation
-; change the amount used in a process based on the changes specified in "change" that
-; come from a metaprocess
-to-report tweak-equation [start change]
-  test "tweak-equation" "operator" "member" item 0 change operators
-  let operator item 0 change
-  
-  test "tweak-equation" "units" "member" item 1 change units
-  let unit item 1 change
-  
-  test "tweak-equation" "value" "number" item 2 change []
-  let new-value item 2 change
-  let result start
-  
-  (ifelse operator = "+"[
-    ; increase
-    (ifelse unit = "%" [
-      set result start * (1 + new-value / 100)
-    ] unit = "|" [
-      set result start + new-value
-    ])
-  ] operator = "-" [
-    ; reduce
-    (ifelse unit = "%" [
-      set result start * (1 - new-value / 100)
-    ] unit = "|" [
-      set result start - new-value
-    ])
-  ][
-    error (word "wrong operator")
-    ]
-  )
-  
-  report result
-end
-
-
-;{} get-subsidy
-; reports any promotion of a named good
-to-report get-subsidy [the-good]
-  ifelse review-subsidy? [
-    test "get-subsidy" "regulators" "anybody" any? regulators []
-    let subsidies [table:keys promoted] of one-of regulators
-    
-    ifelse length subsidies > 0 AND
-    member? the-good subsidies [
-      report [table:get promoted the-good] of one-of regulators
-    ][
-      report 0 ; no subsidy
-    ]
-  ] [
-    report 0 ; no subsidy
-  ]  
-end
-
 
 ; {processor} fulfil-orders
-;
 ; Send orders for delivery that can be fulfilled because
 ; the products are in stock (i.e. having been manufactured)
 to fulfil-orders
@@ -394,7 +307,6 @@ to fulfil-orders
 end
 
 ; {transporter} make-instant-deliveries
-;
 ; Fulfil all delivery requests instantly.
 to make-instant-deliveries
   foreach deliveries [ delivery ->
@@ -431,7 +343,6 @@ to make-instant-deliveries
 end
 
 ; {transporter} make-deliveries
-;
 ; Let deliveries take time through transporting them
 to make-deliveries
   ifelse in-transit? [
@@ -512,13 +423,23 @@ to make-deliveries
   ]
 end
 
+; {transporter} deliver
+; Receive a request to transport goods
+to deliver [ the-product supplier customer ]
+  if verbose? [print (sentence "DELIVER delivery of " [amount] of the-product " " [product-type] of the-product " from " supplier " to " customer)  ]
+  ifelse is-transporter? self [
+    set deliveries lput (list supplier customer the-product) deliveries
+  ] [
+    error (word "Turtle " who ", breed " breed " cannot transport a good")
+  ]
+end
+
 ; {consumer} consume
-;
 ; Consume goods once they have been delivered
 to consume
   foreach table:keys unfulfilled-demand [ good ->
     let the-amount table:get unfulfilled-demand good
-    let cupboard out-stock-neighbors with [ product-type = good and amount <= the-amount ]
+    let cupboard out-stock-neighbors with [ product-type = good ] ; and amount <= the-amount ]
     let meal 0
     if verbose? [print (sentence "CONSUME Consumer has " sum [amount] of cupboard " to eat")]
     while [ any? cupboard and the-amount > 0 ] [
@@ -552,7 +473,7 @@ to consume
         table:put consumption good (table:get consumption good + meal)
         let B table:get consumption good 
         if verbose? [print (sentence "CONSUME consumed before " A " and after " B " from meal " meal )        ]
-        order-status things-consumed good the-amount
+        order-status things-consumed good meal ;the-amount
       ]
       set cupboard out-stock-neighbors with [ product-type = good and amount <= the-amount ]
     ]
@@ -572,21 +493,130 @@ to consume
   ]
 end
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
 ;
-; Main schedule helper procedures
+; Process functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;{process} any-modifications?
+;ask if the processor has any metaprocesses
+to-report any-modifications? [ask-me]
+  let result FALSE
+  if any? my-modifications [
+    set result TRUE
+  ]
+  report result
+end
+
+; {process} equation-modification
+; ask the-process if it shares a meta-process with the-processor and therefore
+; if products need to be adjusted. Return the a specified amount. 
+to-report modified [the-processor]
+  let amendment table:make
+  let the-process self  
+  
+  ; does the equation have any modifications?
+  if any? my-modifications [       ; going to look for [other-end = the-processor]
+    ask my-modifications [         ; if yes...
+      ask other-end [              ; check whether the same modification is ALSO attached to the processor        
+        test "modified" " " "member" self metaprocesses 
+        if any? my-implements with [other-end = the-processor] [          
+          set amendment copy-table effects
+        ]
+      ]
+    ]
+  ]
+  report amendment
+end
+
+; {process} equation-modification
+; If a process is modified by a metaprocess, return the a modified amount of the-good. 
+to-report modified-amount [the-good the-type amendment]
+  let new-amount 0
+  
+  ifelse NOT table:has-key? amendment the-good [
+    error (word "modified product not in table of modifications")
+  ][
+    
+    (ifelse the-type = "input" [
+      ask in-input-neighbors [
+        (ifelse member? product-type table:keys amendment [          
+          set new-amount (tweak-equation amount table:get amendment product-type)
+        ][          
+          set new-amount amount
+        ])
+      ] 
+    ] the-type = "catalyst" [
+      ask in-catalyst-neighbors [
+        (ifelse member? product-type table:keys amendment [
+          set new-amount (tweak-equation amount table:get amendment product-type)
+        ][
+          set new-amount amount
+        ])
+        
+      ]
+    ] the-type = "output" [
+      ask out-output-neighbors [
+        (ifelse member? product-type table:keys amendment [
+          set new-amount (tweak-equation amount table:get amendment product-type)
+        ][
+          set new-amount amount
+        ])
+      ]
+    ][
+      error (word "Asked to modify an unknown product type - expected input/catalyst/output but got " the-type)
+    ])
+    report new-amount
+  ]
+end
+
+; {} tweak-equation
+; change the amount used in a process based on the changes specified in "change" that
+; come from a metaprocess
+to-report tweak-equation [start change]
+  test "tweak-equation" "operator" "member" item 0 change operators
+  let operator item 0 change
+  
+  test "tweak-equation" "units" "member" item 1 change units
+  let unit item 1 change
+  
+  test "tweak-equation" "value" "number" item 2 change []
+  let new-value item 2 change
+  let result start
+  
+  (ifelse operator = "+"[
+    ; increase
+    (ifelse unit = "%" [
+      set result start * (1 + new-value / 100)
+    ] unit = "|" [
+      set result start + new-value
+    ])
+  ] operator = "-" [
+    ; reduce
+    (ifelse unit = "%" [
+      set result start * (1 - new-value / 100)
+    ] unit = "|" [
+      set result start - new-value
+    ])
+  ][
+    error (word "wrong operator")
+    ]
+  )
+  
+  report result
+end
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Business functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; {processor} fulfil-order
-;
 ; Send stock out for delivery to fulfil orders. This is done first by prioritizing
 ; stock with the correct 'amount', and then by using up stock in small amounts,
 ; and finally by reducing the amount of 'larger volume' stock.
-;
-; It is an error to call this procedure if there is not the stock available to
-; be able to fulfil the order
 to fulfil-order [ an-order ]
   let customer item 0 an-order
   test "fulfil-order" "customer" "member" (customer) (turtle-set processors consumers)
@@ -604,7 +634,6 @@ to fulfil-order [ an-order ]
   
   while [ any? my-stock and the-amount > 0 ] [
     ifelse any? my-stock with [ amount = the-amount ] [
-      ;print (sentence "I have enough for " the-amount)
       let a-stock one-of my-stock with [ amount = the-amount ]
       ask choose-transporter [
         deliver a-stock myself customer
@@ -620,12 +649,10 @@ to fulfil-order [ an-order ]
       
       ask choose-transporter [
         deliver a-stock myself customer
-      ]
-      
+      ]      
       ask out-stock-to a-stock [
         die
-      ]
-      
+      ]      
     ]
     set my-stock out-stock-neighbors with [ product-type = the-good and amount <= the-amount ]
   ]
@@ -653,16 +680,44 @@ to fulfil-order [ an-order ]
         set the-amount 0
       ]
     ] [
-      ;error (word the-processor " can't find stock of " the-good " to fulfill order")
+      ;error 
     ]
   ]
-  ;  if the-amount > 0 OR (out-stock-neighbors with [ product-type = the-good and amount > the-amount ] = nobody )[
-  ;    error (word "Processor " who " at (" xcor ", " ycor ") does not have enough " the-good
-  ;      " to fulfil an order with " the-amount " remaining")
-  ;  ]
-  
 end
 
+; {} update-orders
+; update the clock for each order as a count-down until it is ready to be made
+to update-orders
+  ; update timers for orders, but only if there is required stock
+  let id 0
+  foreach table:keys orders [ x ->
+    let invoices table:get orders x
+    set id 0
+    foreach invoices [ i ->
+      ifelse NOT item 4 i [
+        ;check stock
+        if can-run? [stock-summary] of self [
+          set invoices replace-item id invoices replace-item 4 i TRUE
+          let the-processor self
+          let the-process nobody
+          ask implement-neighbors [
+            if member? x get-output [
+              set the-process self
+            ]
+          ]
+          if the-process != nobody [
+            deplete-stock the-processor the-process
+          ]
+        ]
+      ][
+        ;update hatching count-down
+        set invoices replace-item id invoices replace-item 3 i (item 3 item id invoices - 1)
+      ]
+      set id id + 1
+    ]
+    table:put orders x invoices
+  ]
+end
 
 ; {processors} 
 ; depreciate the nth value from a table of nested lists by how-much?
@@ -706,42 +761,6 @@ to-report list-depreciate-nth-item [my-list nth how-much?]
   report  modified-list-of-lists
 end
 
-
-; {} update-orders
-; update the clock for each order as a count-down until it is ready to be made
-to update-orders
-  ; update timers for orders, but only if there is required stock
-  let id 0
-  foreach table:keys orders [ x ->
-    let invoices table:get orders x
-    set id 0
-    foreach invoices [ i ->
-      ifelse NOT item 4 i [
-        ;check stock
-        if can-run?-OLD [stock-summary] of self [
-          set invoices replace-item id invoices replace-item 4 i TRUE
-          let the-processor self
-          let the-process nobody
-          ask implement-neighbors [
-            if member? x get-output [
-              set the-process self
-            ]
-          ]
-          if the-process != nobody [
-            ;print "depleting stock"
-            deplete-stock the-processor the-process
-          ]
-        ]
-      ][
-        ;update hatching count-down
-        set invoices replace-item id invoices replace-item 3 i (item 3 item id invoices - 1)
-      ]
-      set id id + 1
-    ]
-    table:put orders x invoices
-  ]
-end
-
 ; {} deplete-stock
 ; use up stock
 to deplete-stock [the-processor the-process]
@@ -778,22 +797,14 @@ to deplete-stock [the-processor the-process]
   test "deplete-stock" "count" "true" stock-count-after <= stock-count-before []
 end
 
-
-
-; {processor} can-run?
-;
+; {processor} can-run-order?
 ; Checks if there's enough stock in the inventory to run the process in invoice
-to-report can-run? [the-orders]
+to-report can-run-order? [the-orders]
   let which-orders []
   
-  foreach table:keys the-orders [ the-good ->
-    
-    ; name of process that makes good
-    ;let the-process [name] of one-of processes with [member? the-good [product-type] of out-output-neighbors]
-    
+  foreach table:keys the-orders [ the-good ->    
     ; what stock the the processor currently has
     let inventory-got stock-summary
-    ;if verbose? [print (word "CAN-RUN? Inventory-got " inventory-got)]
     
     ; what inputs the processor needs for each process
     let inventory-needed table:make 
@@ -807,13 +818,9 @@ to-report can-run? [the-orders]
         table:put inventory-needed product-type amount
       ]
     ]
-    ;if verbose? [print (word "CAN-RUN? Inventory-needed: " inventory-needed)]
-    
     ; check each stock against the inputs
     let inventory-tick table:make 
-    
-    
-    ;print (sentence "CAN-RUN? " self " Inventory GOT: " inventory-got " | NEEDED: " inventory-needed " | TICK: " inventory-tick)
+
     foreach table:keys inventory-needed [ x ->
       ifelse member? x table:keys inventory-got [
         table:put inventory-tick x ifelse-value( table:get inventory-got x >= table:get inventory-needed x )[TRUE][FALSE]
@@ -823,9 +830,6 @@ to-report can-run? [the-orders]
     ]
     if verbose? [print (word "CAN-RUN? Inventory-tick: " inventory-tick)]
     
-    ; if there are any missing/insufficent stock then report a negative
-    ;report ifelse-value (member? FALSE table:values inventory-tick )[FALSE][TRUE]
-    ;set which-orders lput (ifelse-value (member? FALSE table:values inventory-tick )[FALSE][TRUE]) which-orders
     if NOT (member? FALSE table:values inventory-tick ) [
       set which-orders lput the-good which-orders
     ]
@@ -833,22 +837,19 @@ to-report can-run? [the-orders]
   report which-orders 
 end
 
-
-; {process} can-run?-OLD
-;
-; Checks if there's enough stock in the inventory to run the process
-
-to-report can-run?-OLD [ inventory ]
+; {processor} can-run?
+; Checks if there's enough stock in the inventory to run the process in invoice
+to-report can-run? [ inventory ]
   let result true
-  print (sentence "CAN-RUN? " self " inventory: " inventory)
+  ;print (sentence "CAN-RUN? " self " inventory: " inventory)
   ask in-input-neighbors [    
-    print (sentence "CAN-RUN? " self )
+    ;print (sentence "CAN-RUN? " self )
     ifelse not table:has-key? inventory product-type [
-      print (sentence "CAN-RUN? " self "DON'T have any product " product-type)
+      ;print (sentence "CAN-RUN? " self "DON'T have any product " product-type)
       set result false
     ] [
       if table:get inventory product-type < amount [
-        print (sentence "CAN-RUN? " self "HAVE product " product-type " amount: " amount " v " table:get inventory product-type)
+        ;print (sentence "CAN-RUN? " self "HAVE product " product-type " amount: " amount " v " table:get inventory product-type)
         set result false
       ]
     ]
@@ -857,9 +858,7 @@ to-report can-run?-OLD [ inventory ]
 end
 
 ; {process} has-time?
-;
 ; Checks if there's enough budget to run the process
-
 to-report has-time? [ the-processor ]
   let result true
   if [budget] of the-processor <= 0 [
@@ -869,16 +868,19 @@ to-report has-time? [ the-processor ]
 end
 
 ; {process} can-process?
-;
 ; Checks the constraints of the process to be sure that they are met
-
 to-report can-process? [ implementor ]
-  
   let result true
   
   if any? out-constraint-neighbors [
     let p-state [ patch-state ] of ([ patch-here ] of implementor)
-    let r-state [ regional-state ] of ([ processor-region ] of implementor)
+    let r-state ""
+    ask implementor [
+      if any? regions-here [ ; are there any regions at all
+        let reg-name [ location ] of implementor        
+        set r-state [ regional-state ] of (one-of regions with [name = reg-name])
+      ]
+    ]
     let l-state [ local-state ] of implementor
     
     ask out-constraint-neighbors [
@@ -894,10 +896,8 @@ to-report can-process? [ implementor ]
   
 end
 
-; {any} constraint-met?
-;
+; {} constraint-met?
 ; Check if a condition (constraint or yield) in a table is met according to operators
-
 to-report condition-met? [ state implementor state-level var cmp val condition-type ]
   let result false
   
@@ -934,13 +934,11 @@ to-report condition-met? [ state implementor state-level var cmp val condition-t
     table:put state "$lca" val
   ]
   
-  
   (ifelse state = "error!" [
     output-error (word "BUG! A " condition-type " has been set with invalid level \"" state-level "\"")
   ] is-number? state or not table:has-key? state var [
     output-error (word "State variable \"" var "\" not present at " state-level " level")
-  ] [
-    
+  ] [    
     (ifelse cmp = "=" [
       set result (table:get state var) = val
     ] cmp = "!=" [
@@ -966,16 +964,14 @@ to-report condition-met? [ state implementor state-level var cmp val condition-t
 end
 
 ; {process} order-inputs
-;
 ; Make orders for the inputs to the process
-
 to order-inputs [ the-processor scaling ]
   let the-process [name] of self; name of process
   
   let total-inputs table:make
   let multiplier scaling
   if verbose? [print (sentence "ORDER-INPUTS " the-processor " has " count in-input-neighbors " inputs and " multiplier " scale")]
-  ;print (sentence "ORDER-INPUTS " the-processor " has " count in-input-neighbors " inputs and " multiplier " scale")  
+  
   ; make sure there are some inputs needed
   ; and that there is capacity to run
   if count in-input-neighbors > 0 AND multiplier > 0 [
@@ -983,8 +979,7 @@ to order-inputs [ the-processor scaling ]
       
       let the-good ""
       let the-amount amount ; base amount of the process
-                            ;print (sentence "INPUT base amount " the-amount)      
-      
+                            
       ; check if there are any associated metaprocesses and adjust the amount accordingly
       if any-modifications? myself [
         let amendments modified the-processor
@@ -997,7 +992,6 @@ to order-inputs [ the-processor scaling ]
       ] [
         error (word "Turtle " who ", breed " breed " isn't a product")
       ])
-      ;print (sentence "INPUT asking for amount " the-amount)         
       
       if not table:has-key? total-inputs the-good [
         table:put total-inputs the-good 0
@@ -1006,14 +1000,13 @@ to order-inputs [ the-processor scaling ]
       ;; deduct unit cost of input from processor
       ask the-processor [
         ; record the running cost of inputs
-        table:put running the-process (ifelse-value table:has-key? running the-process [table:get running the-process][0]) -  ((item 0 table:get product-values the-good) * the-amount)
+        table:put running the-process (ifelse-value table:has-key? running the-process [table:get running the-process][0]) - ((item 0 table:get product-values the-good) * the-amount)
       ]
     ]
   ]
   
-  ;print (word the-processor " wants to order " total-inputs)
   foreach table:keys total-inputs [ the-good ->    
-    let the-amount (table:get total-inputs the-good) ;* scaling ;; already scaled above (multiplier * the-amount)
+    let the-amount (table:get total-inputs the-good) 
     test "order-inputs" "amount" "number" the-amount []
     
     let the-stock [stock-amount the-good] of the-processor
@@ -1023,15 +1016,9 @@ to order-inputs [ the-processor scaling ]
       set the-order-amount (the-amount) - the-stock
     ]
     
-    ;; BEN ;;
-    ;; if orders are continuous (every step then there is a lag to deliver them
-    ;; and orders are delivered on alternating days - the present of 'tomorrows' 
-    ;; stock means there is enough stock to NOT order today!
     set the-order-amount the-amount
     
     let the-supplier choose-supplier the-good the-processor
-    ; unit testing - note error if there are no suppliers and the processor has to
-    ; remove the order
     test "order-inputs" "supplier" "anybody" the-supplier []
     if verbose? [print (sentence "ORDER-INPUTS " the-processor " needs to get " the-order-amount " of " the-good " from " the-supplier)]
     
@@ -1039,7 +1026,6 @@ to order-inputs [ the-processor scaling ]
     ; and only order if it is a non-zero amount needed
     ifelse the-supplier != nobody AND the-order-amount > 0[
       ask the-supplier [
-        ;print (sentence "ORDER-INPUTS " self "supplier of " the-good " " the-order-amount)        
         supply the-processor the-good the-order-amount FALSE
         if verbose? [print (sentence "ORDER-INPUTS " the-processor " has ordered " the-order-amount " of " the-good " from " the-supplier)        ]
         ; record purchases
@@ -1059,12 +1045,8 @@ to order-inputs [ the-processor scaling ]
   ;]
 end 
 
-
-
 ; {process} order-catalysts
-;
 ; Make orders for the inputs to the process
-
 to order-catalysts [ the-processor scaling ]
   let the-process [name] of self ; name of process
   let total-catalysts table:make
@@ -1082,7 +1064,7 @@ to order-catalysts [ the-processor scaling ]
     
     (ifelse is-product? self [
       set the-good product-type
-      set the-amount amount ;; BEN ;; don't multiply catalysts
+      set the-amount amount 
     ] [
       error (word "Turtle " who ", breed " breed " isn't a product")
     ])
@@ -1092,7 +1074,7 @@ to order-catalysts [ the-processor scaling ]
     table:put total-catalysts the-good the-amount + (table:get total-catalysts the-good)
     ask the-processor [ 
       ; record the running cost of inputs
-      table:put running the-process (ifelse-value table:has-key? running the-process [table:get running the-process][0]) -  ((item 0 table:get product-values the-good) * the-amount)
+      table:put running the-process (ifelse-value table:has-key? running the-process [table:get running the-process][0]) - ((item 0 table:get product-values the-good) * the-amount)
     ]
   ]
   
@@ -1103,19 +1085,14 @@ to order-catalysts [ the-processor scaling ]
     ;; order new catalysts before they run out
     ; if switch is ON then order stock early, if off then drop scaling to 1 when catalysts have been used up
     ifelse  restockON-rescaleOFF [
-      ;print (word "TICK: " ticks " | WHO: " the-processor " checking restocking...")      
       ask the-processor [         
-        ;print (word the-processor " needs " the-good " has " the-stock)
         ;; do you have the catalyst?
         ifelse member? the-good table:keys stock-summary [
-          ;print (word "I have " the-good " in stock")
           
           let expiry [shelflife] of stock-neighbors with [product-type = the-good]
           let lead-time 0
-          ;print (word the-good " will expire in " expiry)
           if length expiry <= 1 AND member? 0 expiry [ ; only have the expiring stock
                                                        ; AND going to run out soon
-            ;print "buy more"
             ifelse any? ([breed] of one-of suppliers-of the-good) = importers [
               ; if comes from importer then 1 step away
               set lead-time lead-time + 0
@@ -1133,22 +1110,15 @@ to order-catalysts [ the-processor scaling ]
           ;; dupe the-processor into thinking they don't have any of the-good
           if (item 0 expiry - lead-time) <= 0 [
             set the-stock 0
-            ;print (word "Set stock to " the-stock)
           ]   
         ][
           ; buy straight away
-          ; leave lead-time at default 0
         ]
       ]
       
     ][
       if scaling = 0 [
-        ; if capacity drops to zero (e.g., depreciated catalysts) then restart 
-        ; based on how much was produced in the memory divided by standard units
-        
-        ; my-memory is a table (process names) of tables (product names)
-        ;let past table:get ([table:get my-memory the-process] of the-processor) the-good   
-        ;set scaling ceiling past / ([amount] of one-of products with [product-type = the-good AND shelflife = "archetype"])
+        ; if capacity drops to zero (e.g., depreciated catalysts) then restart the scaling
         set scaling 1
       ]
     ]
@@ -1192,153 +1162,50 @@ to order-catalysts [ the-processor scaling ]
   ]
 end
 
-
-;; look up what has been ordered
-to just-ordered [the-amount the-good the-supplier]
-  if not table:has-key? ordered the-good [
-    table:put ordered the-good []
-  ]
-  table:put ordered the-good (list the-amount the-supplier)
-end
-
-
-; {} process
-; ask process how long it takes to make a product
-to-report time-to-make [the-good]
-  let time-needed 0
-  ask one-of processes with [makes? the-good] [
-    set time-needed time-taken
-  ]
-  report time-needed
-end
-
-; {importer, processor} supply
-;
-; Receive a request to supply some goods. Processors just note this down
-; on their orders list; importers create the goods and send them for
-; delivery to the customer.
-;
-; use restock? to flag if the customer is getting new stock after changing
-; equation (change_habit) rather than regular supply
-
-to supply [ customer good the-amount restock?]
-  ;print (word "SUPPLY " self " supplying " customer " " the-amount " of " good)
-  
-  (ifelse is-processor? self [
-    let time-needed time-to-make good
-    ;print (sentence "SUPPLY " self " to " customer " " the-amount " of " good)     
-    let the-order (list customer good the-amount time-needed false)    
-    if not table:has-key? orders good [
-      table:put orders good []
-    ]
-    table:put orders good (lput the-order table:get orders good)    
+;{} get-subsidy
+; reports any promotion of a named good
+to-report get-subsidy [the-good]
+  ifelse review-subsidy? [
+    test "get-subsidy" "regulators" "anybody" any? regulators []
+    let subsidies [table:keys promoted] of one-of regulators
     
-    ;; add cost to supplier
-    let before budget
-    pay self "add" good the-amount
-    let after budget
-    ;print (sentence "SUPPLY " self " paid with budget before:" before " and now: " after " FOR " the-amount " of " good)
-    
-  ] is-importer? self OR is-local-importer? self [
-    if not table:has-key? volume good [
-      table:put volume good 0
+    ifelse length subsidies > 0 AND
+    member? the-good subsidies [
+      report [table:get promoted the-good] of one-of regulators
+    ][
+      report 0 ; no subsidy
     ]
-    table:put volume good (the-amount + table:get volume good)
-    if NOT restock? [
-      order-status things-imported good the-amount
-    ]
-    
-    let the-product nobody
-    hatch-products 1 [
-      set size patch-size / 80
-      set product-type good
-      set amount the-amount
-      if verbose? [print (sentence "SUPPLY new product of " the-amount " of " good)      ]
-      set shelflife item 1 table:get product-values good
-      set shape "box"
-      set heading random 360
-      set color table:get product-colour good
-      fd 1
-      set the-product self
-      set hidden? FALSE
-    ]
-    
-    ;; tabulate product use
-    output-update output-imported (good) (the-amount)
-    
-    ask choose-transporter [
-      deliver the-product myself customer
-    ]
-  ][
-    error (word "Turtle " who ", breed " breed " cannot supply a good")
-  ])
-  
-  ;; deduct cost from customer
-  if is-processor? customer [
-    let before [budget] of customer
-    pay customer "minus" good the-amount
-    let after [budget] of customer
-    ;print (sentence "SUPPLY " customer " has to pay with budget before:" before " and after: " after " FOR " the-amount " of " good)
-  ]
-end
-
-; {transporter} deliver
-;
-; Receive a request to transport goods
-
-to deliver [ the-product supplier customer ]
-  if verbose? [print (sentence "DELIVER delivery of " [amount] of the-product " " [product-type] of the-product " from " supplier " to " customer)  ]
-  ifelse is-transporter? self [
-    set deliveries lput (list supplier customer the-product) deliveries
   ] [
-    error (word "Turtle " who ", breed " breed " cannot transport a good")
-  ]
+    report 0 ; no subsidy
+  ]  
 end
 
+; {processor}
+; helper to pay processor
+to pay [person direction the-good the-amount]
+  
+  ; ask regulator to add to the budget of the processor
+  let subsidy get-subsidy the-good
+  let unit-cost (item 0 table:get product-values the-good)
+  let full-cost the-amount * ( subsidy + unit-cost )
+  
+  (ifelse direction = "add" [
+    ask person [set budget budget + full-cost]
+  ] direction = "minus" [
+    ask person [set budget budget - the-amount * (unit-cost)]
+  ][
+    output-error (word "Don't know direction of payment (should be \"to\" or \"from\")")
+  ])
+end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
 ;
-; Decision-making 'hook' procedures
+; Decision-making 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Instructions for 'hook' procedures
-;
-; They all have the same structure, and assume a chooser parameter on the Interface
-; tab named X-choice indicates the algorithm the user wants. Bear in mind that
-; some choices are made by different kinds of agent -- and your algorithm may want
-; to do things differently depending on which kind of agent it is. All X-choice
-; parameters have an "all-random" option, which means that all agents make a choice
-; in a random or arbitrary way. The hook procedures then all look like this, using
-; a multi-argument (ifelse [] [] ...) to behave in the manner indicated by the
-; X-choice parameter, with a default to raise an exception if the setting of that
-; parameter is not recognized:
-;
-; to-report choose-X
-;   (ifelse X-choice = "all-random" [
-;     report ; whatever the random choice means
-;   ] X-choice = "something" [
-;     report ; whatever something means
-;   ] X-choice = "something-else" [
-;     report ; whatever something-else means
-;   ] X-choice = "etc." [
-;     report ; whatever etc. means
-;   ] [
-;     ; throw an exception for unrecognized X-choice
-;   ])
-; end
-;
-; To maintain readability, it is suggested that if the option to choose cannot be
-; written in a single line of code, then a separate procedure is written to
-; implement that
-
-
 ; {consumer, processor} choose-supplier
-;
 ; Choose a supplier agent (an importer or processor) for the requested good.
 ; The result of this procedure is used in an 'ask' command, so return turtle-set
 ; nobody if your algorithm cannot find a supplier.
-
 to-report choose-supplier [ good me ]
   (ifelse supplier-choice = "all-random" [ ; pick any supplier at random
     report one-of suppliers-of good
@@ -1404,6 +1271,471 @@ to-report choose-supplier [ good me ]
   
 end
 
+; {transporter} choose-next-delivery
+; Choose the next delivery destination for a transporter given their cargo
+; The result must be a customer or processor.
+to-report choose-next-delivery
+  (ifelse next-delivery-choice = "all-random" [
+    report [address] of one-of my-out-cargoes
+  ] [
+    error (word "Unrecognized next-delivery-choice setting: \"" next-delivery-choice "\"")
+  ])
+end
+
+; {transporter} choose-first-delivery
+; Choose the first delivery to make for a transporter with an empty cargo. The
+; result must be the first item of one of the items on the deliveries list.
+to-report choose-first-delivery
+  (ifelse first-delivery-choice = "all-random" [
+    report first (first deliveries)
+  ] [
+    error (word "Unrecognized first-delivery-choice setting: \"" first-delivery-choice "\"")
+  ])
+end
+
+; {importer, processor}
+; Choose a transporter agent to make a delivery. Must return a transporter agent,
+; so make sure your algorithm returns something. (The model cannot cope with a
+; transporter not being found.)
+to-report choose-transporter
+  (ifelse transporter-choice = "all-random" [
+    report one-of transporters
+  ] transporter-choice = "closest" [
+    report min-one-of transporters [distance myself]
+  ]transporter-choice = "closest-emptiest" [
+    report min-one-of transporters [distance myself + 5 * length deliveries]
+  ][
+    error (word "Unrecognized transporter-chocie setting: \"" transporter-choice "\"")
+  ])
+end
+
+; {processor} choose-process
+; Choose processes to run this tick. They will be checked for runnability
+; separately. The result of this procedure is used in an 'ask' command, so
+; return turtle-set nobody if your algorithm decides not to make anything.
+; Otherwise, the result is expected to be a process agent.
+;
+; takes input from GUI for the preference either of tactics or strategy
+to-report choose-process [process-choice]  
+  (ifelse process-choice = "all-random" [
+    ;report out-implement-neighbors
+    ;print (word "Count of processes " count processes " Pick one, eg. " one-of processes)    
+    report n-of (random 1 + n-choices) processes
+  ] process-choice = "high demand" [
+    ; compare things-ordered and things-delivered to look where there is an unfulfilled demand
+    ;
+  ] process-choice = "local-resource"[
+    ; if there is a local-importer, can do anything
+    ; if no local-importer, can't do catalysed equations
+    let options nobody
+    ifelse any? local-importers-here [
+      ; what is locally available
+      let resource-here item 0 [canget] of local-importers-here 
+      
+      ; list either what can be made here
+      let not-here processes with [any? catalyst-neighbors with [product-type = resource-here]]
+      ; or anything that doesn't require a local resource
+      let uncatalysed processes with [NOT any? catalyst-neighbors]
+      
+      set options (turtle-set not-here uncatalysed)      
+    ] [
+      set options processes with [NOT any? catalyst-neighbors]      
+    ]
+    
+    (ifelse count options > n-choices [
+      report n-of (random 1 + n-choices) options
+    ] count options = n-choices [
+      report  options
+    ][
+      error (word "Couldn't select a new equation to run")
+    ])
+    
+  ] process-choice = "cbr" [ ;; use the global case base that includes all possible equation
+                             ;set-processes "global" false    
+    if verbose? [print (sentence "CHOOSE-PROCESS " self " about to pick from memory " sense-world [stock-summary] of self)]
+    ; compare the current sense of the world to the global case-base of all processes
+    ; return the best-matching equation name
+    let eq ""
+    let choices nobody
+    ifelse multi-match? [ ; multiple matches to case
+      print sense-world [stock-summary] of self
+      
+      set eq get-multi-tactic FALSE 
+      ;set choices one-of processes with [name = picked]        
+      set choices processes with [member? name eq]
+      
+    ][ ; single matche to case
+      set eq get-tactic global-case-base sense-world [stock-summary] of self
+      set choices one-of processes with [name = eq]              
+    ]
+    if verbose? [print (sentence "CHOOSE-PROCESS " self " best choices " eq)]    
+    
+    report choices         
+  ] process-choice = "cbr-local" [ ;; use the processor-specific memory case base of things previously run
+                                   ;set-processes "local" false
+    let choices nobody
+    foreach table:keys capacity [ x ->
+      set choices (turtle-set one-of processes with [name = x] choices)
+    ] 
+    report choices
+  ] process-choice = "rbb"[
+    ; use RBB decision-making to identify processes
+    
+    let choices nobody
+    
+    ifelse multi-match? [ ; multiple matches to case
+      ;print sense-world [stock-summary] of self      
+      let eq allocate-uses ;choose-land-use;; pick processes      
+      ;set choices one-of processes with [name = picked]        
+      set choices processes with [member? name eq]
+      
+    ][ ; single matche to case
+      let eq allocate-uses ;choose-land-use;; pick processes
+      set choices one-of processes with [name = eq]              
+    ]
+    
+    report choices
+  ] process-choice = "jaccard" [ ;; pick a process based on similarity of resources
+    let eq (runresult "jaccard-algorithm") 
+    report one-of processes with [member? name eq]
+  ] process-choice = "jaccard-multiple" [ ;; pick a process based on similarity of resources
+    let eq (runresult "jaccard-multiple-algorithm") 
+    report processes with [ member? name eq]
+  ] process-choice = "none"[
+    ; don't have any change in process... just to check  
+    let my-processes [other-end] of my-implements
+    report one-of my-processes  
+  ] [
+    error (word "Unrecognized process-choice setting: \"" process-choice "\"")
+  ])
+end
+
+; {processor} change-habit
+; use hooks from the GUI to select the logic to pick new process(es)
+to change-habit [when how activity] 
+  if NOT member? activity (sentence [name] of processes "everything") [
+    error (word "change-habit expected activity to be either a named process or \"everything\", but got " activity)
+  ] 
+  ; remove existing stock if running during model,
+  ; but retain stock at initialisation 
+  (ifelse when = "go" [
+    ;print (sentence "CHANGE-HABIT " self " has " [name] of implement-neighbors)
+    ; clear old orders & reset counters
+    clear-books activity
+    
+    ;; HOOK TO PICK PROCESS
+    let the-processor self
+    let eq choose-process how
+    
+    if eq != nobody [  
+      ask eq [ 
+        create-implement-from the-processor [
+          set hidden? TRUE
+        ] 
+        ; hatch all the necessary new catalysts in the correct quantities          
+        ask in-catalyst-neighbors [
+          hatch-products 1 [
+            set size patch-size / 80
+            set product-type product-type
+            set amount amount
+            set shelflife item 1 table:get product-values product-type
+            set color table:get product-colour product-type
+            create-stock-from myself
+          ]
+        ]
+      ]
+    ]
+  ] when = "setup" [
+    ;; HOOK TO PICK PROCESS
+    let the-processor self
+    ; pick new equation
+    let eq choose-process how
+    if eq != nobody [ ;if there is at least one choice
+      ask eq [       
+        let x name ; name of process
+        ask one-of processes with [name = x] [     
+          ; make new implement link to process     
+          create-implement-from the-processor [
+            set hidden? TRUE
+          ]         
+          ; set the capacity fo the processor to run the process
+          ask the-processor [            
+            table:put capacity x get-capacity-process x [stock-summary] of self
+          ]
+        ]
+      ]
+    ]   
+  ][
+    error (word "change-habit expected when to be called either \"go\" or \"set-up\", but got " when)
+  ])  
+end
+
+; {processor} tactic
+; change processor, but unlike habit-change, don't remove old stock of catalysts or
+; reset budget etc. This is a short-term annual check of process
+to tactic  
+  ; tally for the number of changes
+  set changed changed + 1
+  
+  ; identify old resources
+  let cata-list get-catalysts
+  
+  ; move orders to importer
+  foreach table:keys orders [x ->
+    foreach table:get orders x [y ->
+      ;; pass orders to the importer
+      let the-customer item 0 y
+      let the-good item 1 y
+      let the-amount item 2 y
+      ask one-of importers [
+        supply the-customer the-good the-amount TRUE
+      ]
+    ]
+    
+    ;; remove orders to this processor
+    table:remove orders x
+  ]
+  
+  ;; remove all things ordered before
+  table:clear ordered
+  
+  ; kill old link to processes
+  ask my-implements [
+    die
+  ]
+  
+  ; clear running
+  foreach table:keys orders [x -> table:remove orders x] ;; running isn't a table?
+                                                         ;set running [] ; make list empty
+  
+  let the-processor self
+  ask choose-process tactical-choice [
+    create-implement-from the-processor [
+      set hidden? TRUE
+      set color green
+    ]
+  ]
+  
+  set n-tactical-changes n-tactical-changes + 1  
+end
+
+; {processor} get-capacity-product
+; calculate the capacity to make a product given the process
+to-report get-capacity-product [the-product]
+  ; what processor currently has
+  let catalyst-got stock-summary
+  ; space for capacity limit
+  let lmt []  
+  ; ask each process currently connected
+  ask out-implement-neighbors with [makes? the-product] [
+    ; number of catalysts
+    ifelse length get-catalysts > 0 [ ;if there are catalysts...
+                                      ; list all catalysts required
+      let catalyst-needed table:from-list get-catalysts      
+      ; loop each catalyst to see how much the processor has
+      foreach table:keys catalyst-needed [ x -> 
+        ;print (sentence "catalysts needed" x)          
+        (ifelse table:has-key? catalyst-got x [
+          set lmt lput ((table:get catalyst-got x) / (table:get catalyst-needed x)) lmt    
+        ][
+          set lmt lput (0) lmt
+        ])
+      ]
+    ][ ;if there are no catalysts... default to capacity = infinite THEN 
+       ; check later to just deliver the ordered amount rather than an infinite amount!
+      set lmt lput (infinite) lmt
+    ]
+  ]
+  
+  ifelse length lmt = 0 [
+    report 0
+    error (word "can't find the capacity limit") 
+  ][
+    report min lmt
+  ]
+end
+
+; {processor} get-capacity-process
+; calculate the capacity to make a product given the process
+to-report get-capacity-process [the-process catalyst-got]
+  ; space for capacity limit
+  let lmt []    
+  ; ask a process of the correct name
+  ask one-of processes with [name = the-process] [
+    ; number of catalysts
+    ifelse length get-catalysts > 0 [ ;if there are catalysts...
+                                      ; list all catalysts required
+      let catalyst-needed table:from-list get-catalysts
+      ; loop each catalyst to see how much the processor has
+      foreach table:keys catalyst-needed [ x -> 
+        (ifelse table:has-key? catalyst-got x [
+          set lmt lput ((table:get catalyst-got x) / (table:get catalyst-needed x)) lmt    
+        ][
+          set lmt lput (0) lmt
+        ])
+      ]
+    ][ ;if there are no catalysts... default to capacity = infinite THEN 
+       ; check later to just deliver the ordered amount rather than an infinite amount!
+      set lmt lput (infinite) lmt
+    ]
+  ]
+  if length lmt < 0 [error (word "can't find the capacity limit") ]
+  ; set default minimum to 1
+  report ifelse-value (length lmt <= 0)[0][min lmt]
+   
+  ;report max (lput 0 lmt)
+end
+
+; {processor} get-capacity-output
+; calculate the output of a product given the capacity for a process
+to-report get-capacity-output [the-output]
+  ; get capacity to run based on catalysts
+  let scaling get-capacity-product the-output
+  
+  let linerun 0  
+  ; get scaled output
+  ask out-implement-neighbors with [makes? the-output] [
+    set linerun [amount] of output-neighbors with [product-type = the-output]
+  ]
+  report (scaling * item 0 linerun)
+end
+
+; {} scale-production
+; how much is an equation needed to increase to 
+; generated the desired amount
+to-report scale-production [the-good the-amount]
+  report ceiling the-amount / [amount] of one-of products with [product-type = the-good AND shelflife = "archetype"]
+end
+
+; {} equation-cost 
+; assign cost of all inputs (inputs + catalysts) to each equation
+to equation-cost 
+  ask processes [
+    let eq-cost 0
+    ask (turtle-set in-catalyst-neighbors in-input-neighbors) [
+      set eq-cost eq-cost + item 0 table:get product-values [product-type] of self
+    ]
+    set price eq-cost
+  ]
+end
+
+; {processors, processes} get-catalysts
+; report catalysts needed
+to-report get-catalysts
+  let cata-list []  
+  
+  (ifelse breed = processes [   
+    ask in-catalyst-neighbors [
+      set cata-list lput (list product-type amount) cata-list
+    ]
+  ] breed = processors [
+    ask implement-neighbors[       
+      ask in-catalyst-neighbors [
+        set cata-list lput (list product-type amount) cata-list
+      ]
+    ]
+  ][
+    error (word "Asking unknown breed for catalysts")
+  ])
+  report cata-list
+end
+
+; {processors, processes} get-inputs
+; report inputs needed
+to-report get-inputs
+  let in-list []  
+  
+  (ifelse breed = processes [    
+    ask in-input-neighbors [
+      set in-list lput (list product-type amount) in-list
+    ]
+  ] breed = processors [
+    ask implement-neighbors[       
+      ask in-input-neighbors [
+        set in-list lput (list product-type amount) in-list
+      ]
+    ]
+  ][
+    error (word "Asking unknown breed for catalysts")
+  ])
+  report in-list
+end
+
+;{processors} check-tactics
+; identify other processes running the same equation(s) and compare the budgets
+; if the budget is below a threshold (on GUI) then change contentment
+; if contentment turns negative then review tactics
+to check-tactics  
+  let the-processor self
+  ifelse table:length capacity = 0 [
+    ; no capacity to do anything, therefore change
+    change-habit "go" tactical-choice "everything"
+    set changed changed + 1
+    set n-tactical-changes n-tactical-changes + 1        
+  ][
+    ;; check each individual processes
+    foreach table:keys capacity [ x -> 
+      ; compare to other processors running same process
+      let compare-to item 0 [[budget] of implement-neighbors] of processes with [name = x]
+      let comparison 0
+      if length compare-to > 0 [
+        set comparison calc-pct strategy-compare compare-to     
+      ]
+      
+      ifelse budget >=  comparison [
+        set discontent discontent + 1
+      ][
+        set discontent discontent - 1
+      ]
+      
+      if discontent < 0 [        
+        if verbose? [print (sentence "CHECK-TACTICS " the-processor " discontent? " discontent " with " x)]
+        ;; review options for a new process
+        change-habit "go" tactical-choice x
+        set changed changed + 1
+        set n-tactical-changes n-tactical-changes + 1        
+      ] 
+    ] 
+  ]   
+end
+
+; {processors} check-strategy
+; identify other processes running the same equation(s) and compare the budgets
+; if the budget is below a threshold (on GUI) then change contentment
+; if contentment turns negative then review strategies
+to check-strategy 
+  ;; make comparison - wholesale not by process
+  ; make wholesale changes
+  change-habit "go" strategical-choice "everything"
+  set n-strategical-changes n-strategical-changes + 1  
+end
+
+
+; {processors} update-memory
+; update the local case-base memory of activities
+to update-memory [append?]
+  (ifelse append? [
+    let new-memory (make-case-base "local")    
+    foreach [name] of implement-neighbors [ x ->
+      let eq cbr:add my-memory new-memory "eq" x
+      if verbose? [print (sentence "UPDATE-MEMORY NEW-memory " my-memory)]
+    ]
+  ][
+    ; new local case-base (i.e. only the most recent processes)
+    let new-memory (make-case-base "local")     
+    set my-memory cbr:new  
+    foreach [name] of implement-neighbors [  x ->
+      let eq cbr:add my-memory new-memory "eq" x
+    ]
+  ])
+end
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Networking functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ; {} distance-cost
 ; calculate distance along network between processor and target
 to-report distance-cost [to-target]
@@ -1411,22 +1743,8 @@ to-report distance-cost [to-target]
     report (list self 0)
   ][
     let route []
-    ; if a network is loaded using nw extension
-;    ifelse use-network? [
-;      set route nw:path-to to-target
-;      
-;      ifelse length route > 0 [
-;        ;; BEN ;; can this really be empty??
-;        let costs map [ x -> [cost] of x ] route
-;        report (list self reduce [ [a b] -> a + b] costs)
-;      ][
-;        error (word "There is no pathway from " self " to " to-target)
-;      ]
-;    ][
-;      ; if not using a define network system
-      let costs [distance to-target] of self
-      report (list self costs)
-;    ]   
+    let costs [distance to-target] of self
+    report (list self costs)
   ]
 end
 
@@ -1501,220 +1819,37 @@ to map-distances
   ]
 end
 
-
-; {transporter} choose-next-delivery
-;
-; Choose the next delivery destination for a transporter given their cargo
-; The result must be a customer or processor.
-
-to-report choose-next-delivery
-  (ifelse next-delivery-choice = "all-random" [
-    report [address] of one-of my-out-cargoes
-  ] [
-    error (word "Unrecognized next-delivery-choice setting: \"" next-delivery-choice "\"")
-  ])
-end
-
-; {transporter} choose-first-delivery
-;
-; Choose the first delivery to make for a transporter with an empty cargo. The
-; result must be the first item of one of the items on the deliveries list.
-
-to-report choose-first-delivery
-  (ifelse first-delivery-choice = "all-random" [
-    report first (first deliveries)
-  ] [
-    error (word "Unrecognized first-delivery-choice setting: \"" first-delivery-choice "\"")
-  ])
-end
-
-; {importer, processor}
-;
-; Choose a transporter agent to make a delivery. Must return a transporter agent,
-; so make sure your algorithm returns something. (The model cannot cope with a
-; transporter not being found.)
-
-to-report choose-transporter
-  (ifelse transporter-choice = "all-random" [
-    report one-of transporters
-  ] transporter-choice = "closest" [
-    report min-one-of transporters [distance myself]
-  ]transporter-choice = "closest-emptiest" [
-    report min-one-of transporters [distance myself + 5 * length deliveries]
-  ][
-    error (word "Unrecognized transporter-chocie setting: \"" transporter-choice "\"")
-  ])
-end
-
-; {processor} choose-process
-;
-; Choose processes to run this tick. They will be checked for runnability
-; separately. The result of this procedure is used in an 'ask' command, so
-; return turtle-set nobody if your algorithm decides not to make anything.
-; Otherwise, the result is expected to be a process agent.
-;
-; takes input from GUI for the preference either of tactics or strategy
-
-to-report choose-process [process-choice]  
-  (ifelse process-choice = "all-random" [
-    ;report out-implement-neighbors
-    ;print (word "Count of processes " count processes " Pick one, eg. " one-of processes)    
-    report n-of (random 1 + n-choices) processes
-  ] process-choice = "high demand" [
-    ; compare things-ordered and things-delivered to look where there is an unfulfilled demand
-    ;
-  ] process-choice = "local-resource"[
-    ; if there is a local-importer, can do anything
-    ; if no local-importer, can't do catalysed equations
-    let options nobody
-    ifelse any? local-importers-here [
-      ; what is locally available
-      let resource-here item 0 [canget] of local-importers-here 
-      
-      ; list either what can be made here
-      let not-here processes with [any? catalyst-neighbors with [product-type = resource-here]]
-      ; or anything that doesn't require a local resource
-      let uncatalysed processes with [NOT any? catalyst-neighbors]
-      
-      set options (turtle-set not-here uncatalysed)      
-    ] [
-      set options processes with [NOT any? catalyst-neighbors]      
-    ]
-    
-    (ifelse count options > n-choices [
-      report n-of (random 1 + n-choices) options
-    ] count options = n-choices [
-      report  options
-    ][
-      error (word "Couldn't select a new equation to run")
-    ])
-    
-  ] process-choice = "cbr" [ ;; use the global case base that includes all possible equation
-                             ;set-processes "global" false    
-    if verbose? [print (sentence "CHOOSE-PROCESS " self " about to pick from memory " sense-world [stock-summary] of self)]
-    ; compare the current sense of the world to the global case-base of all processes
-    ; return the best-matching equation name
-    let eq ""
-    let choices nobody
-    ifelse multi-match? [ ; multiple matches to case
-      print sense-world [stock-summary] of self
-      
-      set eq get-multi-tactic FALSE 
-      ;;;;set eq get-tactics global-case-base sense-world [stock-summary] of self
-      
-      ;set choices one-of processes with [name = picked]        
-      set choices processes with [member? name eq]
-      
-    ][ ; single matche to case
-      set eq get-tactic global-case-base sense-world [stock-summary] of self
-      set choices one-of processes with [name = eq]              
-    ]
-    if verbose? [print (sentence "CHOOSE-PROCESS " self " best choices " eq)]    
-    
-    report choices         
-  ] process-choice = "cbr-local" [ ;; use the processor-specific memory case base of things previously run
-                                   ;set-processes "local" false
-    let choices nobody
-    foreach table:keys capacity [ x ->
-      set choices (turtle-set one-of processes with [name = x] choices)
-    ] 
-    report choices
-  ] process-choice = "none"[
-    ; don't have any change in process... just to check  
-    let my-processes [other-end] of my-implements
-    report one-of my-processes  
-  ] process-choice = "none"[
-    ; don't have any change in process... just to check  
-    let my-processes [other-end] of my-implements
-    report one-of my-processes  
-  ] [
-    error (word "Unrecognized process-choice setting: \"" process-choice "\"")
-  ])
-end
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
-;
-; random habit reasoning
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; {processor} change-habit
-; use hooks from the GUI to select the logic to pick new process(es)
-to change-habit [when how activity] 
-  if NOT member? activity (sentence [name] of processes "everything") [
-    error (word "change-habit expected activity to be either a named process or \"everything\", but got " activity)
-  ] 
-  ; remove existing stock if running during model,
-  ; but retain stock at initialisation 
-  (ifelse when = "go" [
-    print (sentence "CHANGE-HABIT " self " has " [name] of implement-neighbors)
-    ; clear old orders & reset counters
-    clear-books activity
-    
-    ;; HOOK TO PICK PROCESS
-    let the-processor self
-    let eq choose-process how
-    
-    print (sentence "CHANGE-HABIT (A)" self " picked " [name] of eq " added to current : " [name] of implement-neighbors)    
-    if eq != nobody [  
-      ;print (sentence "CHANGE-HABIT " self " picked " eq " but retained capcity " [capacity] of the-processor)     
-      ;foreach table:keys capacity [ x ->  
-      ask eq [ ;x ->      
-               ;ask one-of processes with [name = x] [     
-               ; make new implement link to process     
-        create-implement-from the-processor [
-          set hidden? TRUE
-        ] 
-        ; hatch all the necessary new catalysts in the correct quantities          
-        ask in-catalyst-neighbors [
-          hatch-products 1 [
-            set size patch-size / 80
-            set product-type product-type
-            set amount amount
-            set shelflife item 1 table:get product-values product-type
-            set color table:get product-colour product-type
-            create-stock-from myself
-          ]
-        ]
-        ;]
-      ]
-    ]
-    ;print (sentence "CHANGE-HABIT (B)" self " picked " [name] of eq " added to current : " [name] of implement-neighbors)    
-  ] when = "setup" [
-    ;; HOOK TO PICK PROCESS
-    let the-processor self
-    ; pick new equation
-    let eq choose-process strategical-choice
-    ; print who picked what at set up
-    print (sentence the-processor " picked " [name] of eq " using " strategical-choice)
-    if eq != nobody [ ;if there is at least one choice
-      ask eq [       
-        let x name ; name of process
-        ask one-of processes with [name = x] [     
-          ; make new implement link to process     
-          create-implement-from the-processor [
-            set hidden? TRUE
-          ]         
-          ; set the capacity fo the processor to run the process
-          ask the-processor [            
-            table:put capacity x get-capacity-process x [stock-summary] of self
-          ]
-        ]
-      ]
-    ]   
-  ][
-    error (word "change-habit expected when to be called either \"go\" or \"set-up\", but got " when)
-  ])  
-end
-
-
-;{processor} clear-books
-;move all orders to the importer and reset all counters
-to clear-books [activity]  
-  ;;;; BEN ;;; WORKING HERE - change actiivity to something like "everything"
+;{processor} get-peers
+;report all other processors with the same types of catalysts (note, name not quantity)
+to-report get-peers 
+  let the-processor self
   
+  ; all catalysts
+  let cats table:make
+  ask catalysts [
+    if NOT table:has-key? cats [product-type] of end1 [
+      table:put cats [product-type] of end1 0
+    ]
+    table:put cats [product-type] of end1 (table:get cats [product-type] of end1 + 1)
+  ]
+  
+  ; my stock
+  let my-cat []
+  ask the-processor [
+    set my-cat intersect (table:keys cats) (table:keys stock-summary)
+  ]
+  
+  report my-cat  
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Booking & helpful functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; {processor} clear-books
+; move all orders to the importer and reset all counters
+to clear-books [activity]  
   ; kill off all stock related to activity
   let things []
   ifelse activity = "everything" [  ; remove all stock
@@ -1728,7 +1863,6 @@ to clear-books [activity]
     ]
   ][  ; remove the stock related to "activity" (i.e. one process
       ; identify all products related to process = "activity"
-    print (sentence "CLEAR-BOOKS " self " clear " activity " from " [name] of implement-neighbors)
     ask one-of implement-neighbors with [name = activity] [ 
       set things get-input
       set things (sentence get-catalyst things)
@@ -1771,390 +1905,34 @@ to clear-books [activity]
       ]
     ]
     table:remove orders x
+  ] 
+end
+
+; {processor} just-ordered
+; look up what has been ordered
+to just-ordered [the-amount the-good the-supplier]
+  if not table:has-key? ordered the-good [
+    table:put ordered the-good []
   ]
- 
+  table:put ordered the-good (list the-amount the-supplier)
 end
 
-
-; {processor} tactic
-; change processor, but unlike habit-change, don't remove old stock of catalysts or
-; reset budget etc. This is a short-term annual check of process
-to tactic
-  
-  ; tally for the number of changes
-  set changed changed + 1
-  
-  ; identify old resources
-  let cata-list get-catalysts
-  
-  ; move orders to importer
-  foreach table:keys orders [x ->
-    foreach table:get orders x [y ->
-      ;; pass orders to the importer
-      let the-customer item 0 y
-      let the-good item 1 y
-      let the-amount item 2 y
-      ask one-of importers [
-        supply the-customer the-good the-amount TRUE
-      ]
-    ]
-    
-    ;; remove orders to this processor
-    table:remove orders x
+; {process} time-to-make
+; ask process how long it takes to make a product
+to-report time-to-make [the-good]
+  let time-needed 0
+  ask one-of processes with [makes? the-good] [
+    set time-needed time-taken
   ]
-  
-  ;; remove all things ordered before
-  table:clear ordered
-  
-  ; kill old link to processes
-  ask my-implements [
-    die
-  ]
-  
-  ; clear running
-  foreach table:keys orders [x -> table:remove orders x] ;; running isn't a table?
-                                                         ;set running [] ; make list empty
-  
-  ;; HOOK TO PICK PROCESS
-  ;foreach choose-process tactical-choice [ x -> 
-  let the-processor self
-  ask choose-process tactical-choice [
-    create-implement-from the-processor [
-      set hidden? TRUE
-      set color green
-    ]
-  ]
-  
-  set n-tactical-changes n-tactical-changes + 1  
+  report time-needed
 end
-
-
-
-; {processor} get-capacity-product
-;
-; calculate the capacity to make a product given the process
-
-to-report get-capacity-product [the-product]
-  ; what processor currently has
-  let catalyst-got stock-summary
-  ;print (sentence "stock " catalyst-got)    
-  ; space for capacity limit
-  let lmt []  
-  ; ask each process currently connected
-  ask out-implement-neighbors with [makes? the-product] [
-    ;print (sentence "makes? " self)  
-    ; number of catalysts
-    ifelse length get-catalysts > 0 [ ;if there are catalysts...
-                                      ; list all catalysts required
-      let catalyst-needed table:from-list get-catalysts      
-      ; loop each catalyst to see how much the processor has
-      foreach table:keys catalyst-needed [ x -> 
-        ;print (sentence "catalysts needed" x)          
-        (ifelse table:has-key? catalyst-got x [
-          set lmt lput ((table:get catalyst-got x) / (table:get catalyst-needed x)) lmt    
-        ][
-          set lmt lput (0) lmt
-        ])
-      ]
-    ][ ;if there are no catalysts... default to capacity = infinite THEN 
-       ; check later to just deliver the ordered amount rather than an infinite amount!
-      set lmt lput (infinite) lmt
-    ]
-    ; record the limit on the current equation choice
-    ;print (word name " has " min lmt " limit")
-  ]
-  
-  ifelse length lmt = 0 [
-    report 0
-    error (word "can't find the capacity limit") 
-  ][
-    report min lmt
-  ]
-end
-
-
-; {processor} get-capacity-process
-;
-; calculate the capacity to make a product given the process
-
-to-report get-capacity-process [the-process catalyst-got]
-  ; what processor currently has
-  ;let catalyst-got stock-summary
-  ;print (sentence "stock " catalyst-got)  
-  ; space for capacity limit
-  let lmt []  
-  ;; ask each process currently connected
-  ;ask out-implement-neighbors with [name = the-process] [
-  
-  ;; ask A process of the correct name
-  ask one-of processes with [name = the-process] [
-    ; number of catalysts
-    ifelse length get-catalysts > 0 [ ;if there are catalysts...
-                                      ; list all catalysts required
-      let catalyst-needed table:from-list get-catalysts
-      ; loop each catalyst to see how much the processor has
-      foreach table:keys catalyst-needed [ x -> 
-        (ifelse table:has-key? catalyst-got x [
-          set lmt lput ((table:get catalyst-got x) / (table:get catalyst-needed x)) lmt    
-        ][
-          set lmt lput (0) lmt
-        ])
-      ]
-    ][ ;if there are no catalysts... default to capacity = infinite THEN 
-       ; check later to just deliver the ordered amount rather than an infinite amount!
-      set lmt lput (infinite) lmt
-    ]
-  ]
-  if length lmt < 0 [error (word "can't find the capacity limit") ]
-;  print (word "GET-CAPACITY-PROCESS: " lmt)
-  ; set default minimum to 1
-  report ifelse-value (length lmt <= 0)[0][min lmt]
-   
-  ;report max (lput 0 lmt)
-end
-
-
-; {processor} get-capacity-output
-;
-; calculate the output of a product given the capacity for a process
-
-to-report get-capacity-output [the-output]
-  
-  ; get capacity to run based on catalysts
-  let scaling get-capacity-product the-output
-  
-  let linerun 0  
-  ; get scaled output
-  ask out-implement-neighbors with [makes? the-output] [
-    set linerun [amount] of output-neighbors with [product-type = the-output]
-  ]
-  report (scaling * item 0 linerun)
-end
-
-
-; {processor} invest
-;
-; processor uses profit (from budget) to increase capacity by buying catalysts
-
-;to invest
-;  let the-processor self
-;  let current-capacity [capacity] of the-processor
-;  let current-budget [budget] of the-processor
-;  
-;  let cost-of-equation 0
-;  if any? out-implement-neighbors [   ;if there is a process
-;    ask out-implement-neighbors [     ; ask the process
-;      set cost-of-equation cost-of-equation + [price] of self   
-;    ]
-;  ]
-;  
-;  ;print (word the-processor " cost: " cost-of-equation " | budget: " current-budget " | capacity: " capacity)
-;  
-;  if cost-of-equation > 0 AND floor( current-budget / cost-of-equation ) > 0 [
-;    ;; update capacity ... should actually order catalysts or just note potential?
-;    ;; need to order more catalysts first & deduct costs
-;    ;; payment for catalysts deducted by order-catalysts
-;    let money floor( current-budget / cost-of-equation )
-;    set capacity money
-;    ;set budget budget - (money * cost-of-equation)
-;  ]
-;end
-
-
-; {} scale-production
-;
-; how much is an equation needed to increase to 
-; generated the desired amount
-to-report scale-production [the-good the-amount]
-  report ceiling the-amount / [amount] of one-of products with [product-type = the-good AND shelflife = "archetype"]
-end
-
-
-; {} equation-cost 
-; assign cost of all inputs (inputs + catalysts) to each equation
-to equation-cost 
-  ask processes [
-    let eq-cost 0
-    ask (turtle-set in-catalyst-neighbors in-input-neighbors) [
-      set eq-cost eq-cost + item 0 table:get product-values [product-type] of self
-    ]
-    set price eq-cost
-  ]
-end
-
-
-; {processors, processes} get-catalysts
-; report catalysts needed
-to-report get-catalysts
-  let cata-list []  
-  
-  (ifelse breed = processes [   
-    ask in-catalyst-neighbors [
-      set cata-list lput (list product-type amount) cata-list
-    ]
-  ] breed = processors [
-    ask implement-neighbors[       
-      ask in-catalyst-neighbors [
-        set cata-list lput (list product-type amount) cata-list
-      ]
-    ]
-  ][
-    error (word "Asking unknown breed for catalysts")
-  ])
-  report cata-list
-end
-
-; {processors, processes} get-inputs
-; report inputs needed
-to-report get-inputs
-  let in-list []  
-  
-  (ifelse breed = processes [    
-    ask in-input-neighbors [
-      set in-list lput (list product-type amount) in-list
-    ]
-  ] breed = processors [
-    ask implement-neighbors[       
-      ask in-input-neighbors [
-        set in-list lput (list product-type amount) in-list
-      ]
-    ]
-  ][
-    error (word "Asking unknown breed for catalysts")
-  ])
-  report in-list
-end
-
-
-; {processor}
-; helper to pay processor
-to pay [person direction the-good the-amount]
-  
-  ; ask regulator to add to the budget of the processor
-  let subsidy get-subsidy the-good
-  let unit-cost (item 0 table:get product-values the-good)
-  let full-cost the-amount * ( subsidy + unit-cost )
-  
-  (ifelse direction = "add" [
-    ask person [set budget budget + full-cost]
-  ] direction = "minus" [
-    ask person [set budget budget - the-amount * (unit-cost)]
-  ][
-    output-error (word "Don't know direction of payment (should be \"to\" or \"from\")")
-  ])
-end
-
-
-;{processor} get-peers
-;report all other processors with the same types of catalysts (note, name not quantity)
-to-report get-peers 
-  let the-processor self
-  
-  ; all catalysts
-  let cats table:make
-  ask catalysts [
-    if NOT table:has-key? cats [product-type] of end1 [
-      table:put cats [product-type] of end1 0
-    ]
-    table:put cats [product-type] of end1 (table:get cats [product-type] of end1 + 1)
-  ]
-  
-  ; my stock
-  let my-cat []
-  ask the-processor [
-    set my-cat intersect (table:keys cats) (table:keys stock-summary)
-  ]
-  
-  report my-cat
-  
-end
-
-;{processors} check-tactics
-; identify other processes running the same equation(s) and compare the budgets
-; if the budget is below a threshold (on GUI) then change contentment
-; if contentment turns negative then review tactics
-to check-tactics  
-  let the-processor self
-  ;print (sentence "CHECK-TACTICS " the-processor " capacity " capacity)
-  ifelse table:length capacity = 0 [
-    ; no capacity to do anything, therefore change
-    change-habit "go" tactical-choice "everything"
-    set changed changed + 1
-    set n-tactical-changes n-tactical-changes + 1        
-  ][
-    ;; check each individual processes
-    foreach table:keys capacity [ x -> 
-      ; compare to other processors running same process
-      let compare-to item 0 [[budget] of implement-neighbors] of processes with [name = x]
-      let comparison 0
-      if length compare-to > 0 [
-        set comparison calc-pct strategy-compare compare-to     
-      ]
-      
-      ifelse budget >=  comparison [
-        set discontent discontent + 1
-      ][
-        set discontent discontent - 1
-      ]
-      
-      if discontent < 0 [        
-        if verbose? [print (sentence "CHECK-TACTICS " the-processor " discontent? " discontent " with " x)]
-        ;; review options for a new process
-        change-habit "go" tactical-choice x
-        set changed changed + 1
-        set n-tactical-changes n-tactical-changes + 1        
-      ] 
-    ] 
-  ]   
-end
-
-;{processors} check-strategy
-; identify other processes running the same equation(s) and compare the budgets
-; if the budget is below a threshold (on GUI) then change contentment
-; if contentment turns negative then review strategies
-to check-strategy 
-  ;; make comparison - wholesale not by process
-  ; make wholesale changes
-  change-habit "go" strategical-choice "everything"
-  set n-strategical-changes n-strategical-changes + 1  
-end
-
-
-;;{processors} update-memory
-;;update the local case-base memory of activities
-to update-memory [append?]
-  (ifelse append? [
-    let new-memory (make-case-base "local")    
-    foreach [name] of implement-neighbors [ x ->
-      let eq cbr:add my-memory new-memory "eq" x
-      if verbose? [print (sentence "UPDATE-MEMORY NEW-memory " my-memory)]
-    ]
-  ][
-    ; new local case-base (i.e. only the most recent processes)
-    let new-memory (make-case-base "local")     
-    set my-memory cbr:new  
-    foreach [name] of implement-neighbors [  x ->
-      let eq cbr:add my-memory new-memory "eq" x
-    ]
-  ])
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
-;
-; Supplementary information procedures
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; {process, processor} makes?
-;
 ; Return true if the process or processor makes the good
-
 to-report makes? [ good ]
   (ifelse is-process? self [
     report any? out-output-neighbors with [ product-type = good ]
   ] is-processor? self [
-    ;report (([get-capacity-process [name] of one-of out-implement-neighbors with [makes? good]]) > 0) AND (any? out-implement-neighbors with [ makes? good ])
     report any? out-implement-neighbors with [ makes? good ] ;AND (get-capacity-product good > 0)]
   ] [
     report false
@@ -2162,27 +1940,21 @@ to-report makes? [ good ]
 end
 
 ; {processor, consumer} in-stock?
-;
 ; Return true of the turtle has any of the good
-
 to-report in-stock? [ good ]
   report any? out-stock-neighbors with [product-type = good ]
 end
 
 ; {processor, consumer} stock-amount
-;
 ; Return the amount of stock the turtle has of the good
-
 to-report stock-amount [ good ]
   let my-stock out-stock-neighbors with [product-type = good ]
   report ifelse-value (any? my-stock) [ sum [ amount ] of my-stock ] [ 0 ]
 end
 
 ; {processor, consumer} stock-summary
-;
 ; Return a table keyed by goods summarizing the amount of each good
 ; the turtle has in stock
-
 to-report stock-summary
   let total-stock table:make
   ask out-stock-neighbors [
@@ -2197,20 +1969,13 @@ to-report stock-summary
 end
 
 ; {processor} order-amount
-;
 ; Return a total of the amount of the good that has been ordered
 ; by anyone
-
 to-report order-amount [ good ]
   ifelse not table:has-key? orders good [
-    ;print (word "not ordered " good " before")
     report 0
   ][
     let the-amount 0
-    ; add all orders together
-    ;    foreach table:get orders good [ the-order ->   
-    ;      ;set the-amount the-amount + (item 2 the-order)
-    ;    ]
     ; only add new orders
     let time-needed time-to-make good ; time needed to make the produce
     let new-orders filter [i -> item 3 i = time-needed ] table:get orders good ; only new orders with max time
@@ -2221,12 +1986,10 @@ to-report order-amount [ good ]
 end
 
 ; {any} suppliers-of
-;
 ; Return an agentset of turtles that supply a particular good,
 ; prioritizing processors over importers. For the sake of speed,
 ; a table is maintained so that this can be returned quickly
 ; after the first time a request has been made.
-
 to-report suppliers-of [ good ]
   let procsup processors with [  makes? good AND closed = FALSE ]
   if any? procsup [
@@ -2246,8 +2009,6 @@ to-report suppliers-of [ good ]
     ;; global importers can import products not otherwise made
     let impsup importers with [ member? good (word [canget] of self) ]
     ifelse any? impsup [
-      ;table:put suppliers good impsup
-      ;print (word ticks " " good " " impsup)
       report impsup      
     ][
       report importers
@@ -2257,7 +2018,6 @@ to-report suppliers-of [ good ]
 end
 
 ; {processor}
-;
 ; reached the limit of the capacity to produce, so stop stacking orders
 to-report has-capacity?
   let capacity? true
@@ -2268,10 +2028,8 @@ to-report has-capacity?
 end
 
 ; {processor} ratelimit
-;
 ; Return the rate limiting catalyst that can be used to
 ; determine how many time to multiply an equation.
-
 to-report ratelimit
   let me self
   let ratelimiting [] ;place to store how many times an agent can run an equation
@@ -2297,9 +2055,7 @@ to-report ratelimit
 end
 
 ; {process} cost-to-run
-;
 ; total cost of all inputs (not catalysts) needed to run equation
-
 to-report cost-to-run
   let input-cost 0
   ask in-input-neighbors [
@@ -2309,9 +2065,7 @@ to-report cost-to-run
 end
 
 ; {any} order-status
-;
 ; populate tables with the current number of orders (made, produced or fulfilled)
-
 to order-status [the-table the-good the-amount]
   if NOT table:has-key? the-table the-good [
     table:put the-table the-good (0)
@@ -2319,10 +2073,7 @@ to order-status [the-table the-good the-amount]
   table:put the-table the-good (the-amount + table:get the-table the-good)
 end
 
-
-
 ; {processors, process, product} is-an-catalysts?
-;
 ; lists catalysts needed by current equations
 to-report is-an-catalyst? [a-thing]
   let whos-asking self
@@ -2344,7 +2095,6 @@ to-report is-an-catalyst? [a-thing]
 end
 
 ; {processors, process, product} is-an-inputs?
-;
 ; lists inputs needed by current equations
 to-report is-an-input? [a-thing]
   let whos-asking self
@@ -2366,7 +2116,6 @@ to-report is-an-input? [a-thing]
 end
 
 ; {process} get-input
-;
 ; lists inputs needed by current equations
 to-report get-input
   let inputs-needed []
@@ -2381,7 +2130,6 @@ to-report get-input
 end
 
 ; {process} get-catalyst
-;
 ; lists inputs needed by current equations
 to-report get-catalyst
   let catalyts-needed []
@@ -2396,7 +2144,6 @@ to-report get-catalyst
 end
 
 ; {process} get-output
-;
 ; lists outputs made by current equations
 to-report get-output
   let outputs-made []
@@ -2411,7 +2158,6 @@ to-report get-output
 end
 
 ; {product} depreciate
-;
 ; depreciate the product shelflife
 ; NOTE cannot depreciate the archetypes that are linked to processes
 ; and that are used to identify what is input/catalyst/output for each
@@ -2425,10 +2171,7 @@ to depreciate
   ]
 end
 
-
-
 ; {processors, consumers} consolidate-stock
-;
 ; add stock together if products are the same, then kill excess
 to consolidate-stock
   let my-things out-stock-neighbors
@@ -2517,9 +2260,7 @@ end
 
 
 ; {process} variable-outcome
-;
 ; Checks the constraints of the process to be sure that they are met
-
 to-report variable-outcome [ implementor std-outcome ]
   let result FALSE
   
@@ -2557,6 +2298,13 @@ to-report variable-outcome [ implementor std-outcome ]
 end
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Sampling distributions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; {} random-numbers
+; sample from a named distribution
 to-report random-numbers [dist-name parameters n]
   (ifelse dist-name = "normal" [
     report n-values n [random-normal item 0 parameters item 1 parameters]
@@ -2573,7 +2321,7 @@ to-report random-numbers [dist-name parameters n]
   ])
 end
 
-; random triangular distribution
+; {} random-triangular 
 ; from: https://www.reddit.com/r/NetLogo/comments/4rwi32/code_for_building_triangular_triangle/
 to-report random-triangular [parameters]
   let #a item 0 sort parameters
@@ -2590,7 +2338,7 @@ to-report random-triangular [parameters]
   ]
 end
 
-; random beta distribution
+; {} random-beta
 ; from: https://stackoverflow.com/questions/38493122/draw-a-random-beta-distribution-in-netlogo
 to-report random-beta [ parameters ]
   let #alpha item 0 sort parameters
@@ -2661,9 +2409,6 @@ to-report sample-histogram [x]
   ; count observation in each bin
   let freq (map [L -> length (filter [ v -> v > item 0 L AND v <= item 1 L ] x)] bin-limits)
   
-  ;show (word n_val " observations between " mn " and " mx " seperated into " n_bins)
-  ;show sample-histogram freq ranges
-  
   ;; sample histogram
   let accum reduce [ [ result next ] -> ifelse-value (length result > 0) [
     lput (next + last result) result
@@ -2714,6 +2459,11 @@ to-report calc-pct [ #pct #vals ]
 end
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Utilities
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;{} copy-table
 ;utility to make a copy of a table
 to-report copy-table [ orig ]
@@ -2723,8 +2473,6 @@ to-report copy-table [ orig ]
   ]
   report copy
 end
-
-
 
 ;{} value-type
 ;utility to determine object type
@@ -2754,7 +2502,6 @@ to-report value-type [ thing ]
   report what?
 end
 
-
 ; {} join-tables
 ; add the contents of table2 to table1.
 ; Where keys are shared, sum the amount, 
@@ -2766,22 +2513,54 @@ to-report join-tables [table1 table2]
     ][
       table:put table1 i ( table:get table2 i )
     ]
-  ]
-  
-  
+  ]   
   report table1
 end
 
-
-
-;{processors} predict-order
-;identify stock that is about to expire and order more before it does.
-;Use the shelf-life to work out when it will expire + a process that makes it
-;to see how long in advance you need it
-to predict-order 
-  ; how long until it will expire
-  ask out-stock-neighbors [
-    ;let expiry shelf-life
-  ]
+; {} upper-case-string
+; Case Conversion Example from Netlogo library
+to-report upper-case-string [s]
+  ifelse empty? s
+    [ report "" ]
+    [ report word (upper-case-char first s)
+                  (upper-case-string butfirst s) ]
 end
 
+; {} upper-case-char
+; Case Conversion Example from Netlogo library
+to-report upper-case-char [c]
+   let pos position c "abcdefghijklmnopqrstuvwxyz"
+   ifelse pos = false
+     [ report c ]
+     [ report item pos "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ]
+end
+
+; {} lower-case-string
+; Case Conversion Example from Netlogo library
+to-report lower-case-string [s]
+  ifelse empty? s
+    [ report "" ]
+    [ report word (lower-case-char first s)
+                  (lower-case-string butfirst s) ]
+end
+
+; {} lower-case-char
+; Case Conversion Example from Netlogo library
+to-report lower-case-char [c]
+   let pos position c "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+   ifelse pos = false
+     [ report c ]
+     [ report item pos "abcdefghijklmnopqrstuvwxyz" ]
+end
+
+; {} current-month
+; convert ticks into current months
+to-report current-month
+  report ((ticks mod (convert-time 12 "month")) + 1)
+end
+
+; {} current-month
+; convert ticks into current years
+to-report current-year
+  report floor ((ticks / (convert-time 1 "year"))) + 1
+end

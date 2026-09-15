@@ -4,14 +4,14 @@ use-region-file?,FALSE
 #
 ##reading inputs ----------------------------
 use-importer-file?,TRUE
-Importer-file,system2/importers.csv
+Importer-file,system1/importers.csv
 use-transporter-file?,FALSE
-consumer-file,system2/consumers.csv
+consumer-file,system1/consumers.csv
 use-regulator-file?,FALSE
-processor-file,system2/processors.csv
-equation-file,system2/processes.txt
-product-attributes,system2/products.csv
-yield-file,system2/yields.csv
+processor-file,system1/processors.csv
+equation-file,system1/processes.txt
+product-attributes,system1/products.csv
+yield-file,system1/yields.csv
 #
 ## agents -----------------------------------
 import-anything?,FALSE
@@ -48,4 +48,4 @@ n-samples,300
 #
 ## output -----------------------------------
 output?,FALSE
-output-dir,system2
+output-dir,system1

@@ -1,14 +1,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
 ;
-; STRAVVS Read from file
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v0.1, 14th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; {any} file-error
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-; Give an error message
+; Read input data
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; {} file-error
+; Give an error message
 to file-error [file-kind file-name line-number expecting found]
   print (word "In " file-kind " file \"" file-name "\" (line number " line-number "): expecting " expecting ", but found \"" found "\"")
   ifelse is-list? expecting [
@@ -19,25 +23,25 @@ to file-error [file-kind file-name line-number expecting found]
   output-error (word "In " file-kind " file \"" file-name "\" (line number " line-number "): expecting " expecting ", but found \"" found "\"")
 end
 
-; is-first-alpha?() 
+; {} is-first-alpha?
 ; detect if start of string is a letter character
 to-report is-first-alpha? [str]
   report is-string? str and (((first str) >= "a" and (first str) <= "z") or ((first str) >= "A" and (first str) <= "Z"))
 end
 
-; is-first-numeric?() 
+; {} is-first-numeric? 
 ; detect if start of string is a number character
 to-report is-first-numeric? [str]
   report is-number? str or ((first str) >= "0" and (first str) <= "9")
 end
 
-; is-first-alpha?() 
+; {} is-first-alpha?
 ; detect if start of string is a letter or number character
 to-report is-first-alphanumeric? [str]
   report (is-first-alpha? str) or (is-first-numeric? str)
 end
 
-; read-effects-list () 
+; {} read-effects-list
 ; parse string into units and values for meta-processes
 to-report read-effects-list [tokens line-number]
   let resource-list []
@@ -93,7 +97,7 @@ to-report read-effects-list [tokens line-number]
   report (list resource-list tokens)
 end
 
-; read-resources-list ()
+; {} read-resources-list
 ; parse string into resources used by a process
 to-report read-resource-list [tokens line-number]
   let resource-list []
@@ -126,7 +130,7 @@ to-report read-resource-list [tokens line-number]
   report (list resource-list tokens)
 end
 
-; read-yields()
+; {} read-yields
 ; read a file that describes how the yield of each process varies
 ; this variability can be a function of patch constraints or just an inherent variability
 to read-yields
@@ -169,7 +173,7 @@ to read-yields
   ]
 end
 
-; join-yields-processes()
+; {} join-yields-processes
 ; creates an uncertainty link between a yield and a process
 to join-yields-processes
   ask yields [   
@@ -184,7 +188,7 @@ to join-yields-processes
   ]
 end
 
-; read-equations()
+; {} read-equations
 ; parse the input file of equations in the form of Extended Backus-Naur Form (EBNF) specification 
 ; see Info for description
 to read-equations
@@ -319,8 +323,8 @@ to read-equations
             
             let var substring lvl-var (1 + position "/" lvl-var) length lvl-var
             
-            if first var = "$" and not member? var [ "$ticks" "$months" "$procs" "$stocks" "$orders" "$stock-amounts" ] [
-              file-error "equation" equation-file line-number [ "$ticks" "$months" "$procs" "$stocks" "$orders" "$stock-amounts" ] var
+            if first var = "$" and not member? var [ "$ticks" "$months" "$procs" "$stocks" "$orders" "$stock-amounts" "$limit"] [
+              file-error "equation" equation-file line-number [ "$ticks" "$months" "$procs" "$stocks" "$orders" "$stock-amounts" "$limit"] var
             ]
             
             if not member? cmp [ "=" "!=" "<" "<=" ">" ">=" "in" "!in" ] [
@@ -530,7 +534,6 @@ end
 
 
 ; {process} generate-components
-;
 ; hatch the inputs/outputs from each equation
 ; products are coded as agents based on their type and units
 to-report generate-components [ component-type quantity]
@@ -576,19 +579,23 @@ to read-agents [ file-name file-kind ]
     if file-kind = "processor" [
       create-processors 1 [
         set shape "factory"
-        ;set xcor item 0 data ;x coordinate
-        ;set ycor item 1 data ;y coordinate
         coordinates data
         set size 0.2
         set orders table:make
         set ordered table:make
         set friends nobody
-        ;set resources table:make
         set capacity table:make 
-        ;let balance 0
         set dormant 0
         set long-dormant 0
         set closed FALSE
+        
+        ;; based on RBB
+        set p-imitate random-float 1  ;;BEN;; initially give a number but put on GUI
+        set aspiration max-budget ;;BEN;; initially give a number, but may change to a more nuanced description of targets?
+        set neighbourhood nobody ;;BEN;; list other processors with similar resources?
+        set satisfice-strategy "habit-algorithm" ;;BEN;;
+        set imitative-strategy "jaccard-multiple-algorithm" ;;weighted-copy-algorithm" ;;BEN;;
+        set experiment-strategy "random-algorithm" ;;BEN;;
         
         ifelse use-region-file? [
           ; remove a single "region" coordinate
@@ -599,7 +606,6 @@ to read-agents [ file-name file-kind ]
         ]
         
         set running table:make
-        ;set processor-region one-of regions ; TO-DO populate this from the file!
         set local-state table:make
         
         ; allow arbitrary number of processes per processor
@@ -651,10 +657,6 @@ to read-agents [ file-name file-kind ]
           file-error file-kind file-name line-number "equation or 'unknown'" all-equations
         ]
         if item 0 all-equations = "unknown" [
-          ; if the equation is unknown,
-;          set all-equations [name] of choose-process "all-random"
-;          set-processes "global" false          
-;          set all-equations table:keys capacity
           set J 0 ; length all-equations
         ]
         ; loop through equations
@@ -836,10 +838,8 @@ end
 
 
 
-;; read-series
-;
-; this should read a timeseries of consumer demans
-; it doesn't seem to work well since there is no time in the file, but rows
+; {} read-series
+; this should read a timeseries of consumer demans assuming that rows
 ; correspond to ticks
 to read-series[ file-name ]
   file-open file-name
@@ -865,8 +865,7 @@ to read-series[ file-name ]
   ]
 end
 
-;; make transport
-;
+; {} make-transporter
 ; make a single transporter
 to make-transporter
   create-transporters 1 [
@@ -885,8 +884,7 @@ to make-transporter
 end
 
 
-;; Read products
-;
+; {} read-products
 ; CSV file of product name , price, shelflife....
 to read-products [ file-name ]
   set product-values table:make
@@ -916,8 +914,8 @@ to read-products [ file-name ]
     (table:length product-values) " products")
 end
 
-
-;; standardise time units
+; {} convert-time
+; standardise time units
 to-report convert-time [t unit]
   ; list of time unit options
   let options ["days" "weeks" "months" "years"]
@@ -925,26 +923,19 @@ to-report convert-time [t unit]
   ; make '2D' nested list with 1stD = time_unit & 2ndD = unit
   let _time (list [1 7 30 365] (list (1 / 7) 1 4 52) (list (1 / 30) (1 / 4) 1 12) (list (1 / 365) (1 / 52) (1 / 12) 1))
   
-  ; This option is more 'ontologically consistent', but has 13 months per year.
-  ;let _time (list [ 1 7 28 364 ] (list (1 / 7) 1 4 52 ) (list (1 / 28) (1 / 4) 1 13 ) (list (1 / 364) (1 / 52) (1 / 13) 1) )
-  
   ; index time for 2D conversion matrix
   let i position tick-unit options
   let j position (remove "s" unit) map [k -> remove "s" k] options
-  ; remove plurals for disambiguation -- assumes time units don't have an 's' other than as plural
-  ; (WARNING: don't use this with seconds as time units!)
   
   ; get conversion factor
   let _convert item j item i _time
   
   ; report standardised units
-  ;report round t * _convert
-  ;; BEN ;; ceiling time so that can't run multiple times if time step < equation runtime
   report ceiling t * _convert
 end
 
-
-;; either read coordinates from agent-file or randomly generate from region
+; {} coordinates
+; either read coordinates from agent-file or randomly generate from region
 to coordinates [token]
   ifelse use-region-file? [
     let loc [0 0]
@@ -953,6 +944,9 @@ to coordinates [token]
       let place (gis:find-one-feature region-map "NAME" (item 0 token))
       ifelse NOT (place = nobody) [
         set loc gis:location-of gis:random-point-inside place
+        
+        ; set region-name for each processor
+        if breed = processors [set processor-region 0]
       ][
         error (word "Expected the NAME of a polygon, but got <" (item 0 token) "> instead")
       ]
@@ -960,16 +954,17 @@ to coordinates [token]
     ] [
       print error-message
     ]
-    
-    
+     
     setxy (item 0 loc) (item 1 loc)
     set location item 0 token
   ][
     setxy (item 0 token) (item 1 token)
     set location "global"
+    if breed = processors [set processor-region 0]
   ]
 end
 
+; {} check-products
 ; check that all products in the equations are in the product attribute files
 ; note: not all products will have an entry in the yields file if they do not (need) variable 
 ; output (e.g. they are catalysts or only inputs)
@@ -986,13 +981,9 @@ let values-on-types (filter [i -> NOT member? i types ] values)
     error (word "Some products are in the product-types that are not in the product-values: " types-on-values)
   ]
 
-  ;;   the reverse probably doesn't matter as these are available to equations even if not currently used
-;  if length values-on-types > 0 [
-;    error (word "Some products are in the product-values that are not in the product-types: " values-on-types)
-;  ]
-
 end
 
+; {} match-text
 ; determine if sub-string is within larger string
 to-report match-text [sub strings]
   ; find any *
@@ -1019,7 +1010,6 @@ to-report match-text [sub strings]
     ]
   ]
   
-  ;print (word "Looking at begining " begins-with? ", ending " ends-with? ", exact " exact-with? " or anywhere " anywhere-with?) 
   let keep []
   foreach strings [ x ->
     if position sub x != FALSE [

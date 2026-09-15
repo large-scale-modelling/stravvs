@@ -1,14 +1,21 @@
-;## INPUTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v0.1, 14th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;--- read init file ----------------
-; read-inits()
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; World Builder
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; {} read-inits
 ; Input files contain all the parameter values needed to run the code. Anything 
 ; not specified will take the value of the GUI. Alternatively, parameters can be specified
 ; in the GUI
 to read-inits 
-  ;ca
-  ;set error-state? false
-  
   file-close-all
   
   file-open init-file
@@ -45,12 +52,8 @@ to read-inits
   file-close
 end
 
-;--- Start up ----------------------
-;; can't put these earlier than build-world because resizing the world
-;; kills all turtles!
-
-; big-bang() 
-;read in all appropriate files
+; {} big-bang
+; read in all appropriate files to create simulation world
 to big-bang  
   ; read products
   read-products product-attributes  
@@ -82,8 +85,7 @@ to big-bang
   check-products
 end
 
-;--- World building ----------------
-; build-world() 
+; {} build-world
 ; build the world space and create the world
 to build-world 
   (ifelse world = "scotland" [    

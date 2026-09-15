@@ -1,9 +1,24 @@
-extensions [csv time table gis nw profiler cbr]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v2.0, 15th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Nick Roxburgh <nick.roxburgh@hutton.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Housekeeping
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+extensions [csv time table gis nw profiler cbr mgr]
 __includes ["lib/stravvs_ontology.nls" "lib/stravvs_readinput.nls" "lib/stravvs_procedures.nls" "lib/stravvs_builder.nls"
-  "lib/case-based-reasoning.nls" "lib/scotland_worldbuilder.nls" "lib/hierarchy.nls" "lib/unit_testing.nls"]
+  "lib/case-based-reasoning_v2.nls" "lib/scotland_worldbuilder.nls" "lib/hierarchy.nls" "lib/unit_testing.nls" "lib/rbb_decisionmaking.nls"]
 
 globals [
-   products-unique
+  products-unique
   product-colour; table of products & their colours for consistent plotting
   product-values; table of products & attributes (price & shelf-life)
   product-types ; table of products & their ingredients
@@ -18,7 +33,6 @@ globals [
   global-state ; table of state variables at global level
   date
   region-map ; GIS map defining region boundaries
-             ;
   things-ordered    ; table of products ordered
   things-made       ; table of products made
   things-delivered  ; table of products delivered
@@ -34,40 +48,33 @@ globals [
   non-file-transporter-capacity  ; capacity of transporters if they are not read from a file
   non-file-transporter-speed  ; speed of transporters if they are not read from a file
   route-map ; description of connections between processors, importers, and consumers
-
   network; list of pairwise costs [from to cost]
-         ;;
   index-case ; processor to spit out progress
-             ;;
   processors-died ; count how many processors have died by changing too often
   output-file ; file to store results
-
   equation-header
   product-header
   output-used; table of processing status
   output-made; table of processing status
   output-equation; table of processing status
   output-imported; table of processing status
-
   n-strategical-changes ;record how many times any processor has changed equation (habit-change)
   n-tactical-changes ;record how many times any processor has changed equation (tactic)
-
   error?
   n-fails
   n-tests
-
   operators
   units
-  infinite ;infinity
+  infinite ;very large number to approximate infinity
 ]
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
 ;
 ; Setup
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; {} choose-seed
+; Set random seed - either from GUI or produce new see
 to choose-seed
   if new-seed? [
     set run-seed new-seed
@@ -75,8 +82,10 @@ to choose-seed
   random-seed run-seed
 end
 
+; {} show-warranty
+; Print warranty to command screen
 to show-warranty
-  print "STRAVVS  Copyright (C) 2022  The James Hutton Institute"
+  print "STRAVVS  Copyright (C) 2026  The University of Aberdeen & The James Hutton Institute"
   print "This program comes with ABSOLUTELY NO WARRANTY."
   print "This is free software, and you are welcome to redistribute it"
   print "under certain conditions. For more information on this and"
@@ -84,16 +93,13 @@ to show-warranty
 end
 
 
-; {observer} setupcc
-;
+; {observer} setup
 ; Setup routine that loads data in from files
-
 to setup
   reset-timer
   ca
   set error-state? false
   choose-seed
-
   set operators (sentence "+ = - > <")
   set units (sentence "% |")
   set infinite 1e+10
@@ -121,7 +127,7 @@ to setup
 
   ; start clock
   if empty? start-date [
-    set date time:create "2023/01/01"
+    set date time:create "2027/01/01"
   ]
 
   ; tables to store what is ordered, made and delivered
@@ -182,18 +188,17 @@ to setup
 
   ; allocate equations to processors
   ask processors [
+
     ; just make sure that the budget is < change and therefore trigger the
     ; habit change
     set long-budget abs (2 * max-change)
 
-;print (sentence "SETUP A) " self " Implements: " [name] of implement-neighbors)
     ; set first memory
     update-memory false
-;print (sentence "SETUP B) " self " Implements: " [name] of implement-neighbors)
 
-
-    change-habit "setup" strategical-choice "everything"
-;print (sentence "SETUP C) " self " Implements: " [name] of implement-neighbors)
+    ;; at set-up, use jaccard-choice to pick processes that are weighted by resources.
+    ;; if processes are equally likely, they are randomly selected
+    change-habit "setup" "jaccard-multiple" "everything"
 
     set changed 0
     set discontent 0
@@ -210,21 +215,15 @@ to setup
     update-memory false
   ]
 
-
-
   set suppliers table:make ; this table is built as suppliers-of is used
-
   set global-state table:make
-
-  ;  ask patches [
-  ;    set patch-state table:make
-  ;  ]
+  set n-strategical-changes 0
+  set n-tactical-changes 0
+  ; pick one processor to track
+  set index-case one-of processors
 
   ; zero timer
   reset-ticks
-
-  ; pick one processor to track
-  set index-case one-of processors
 
   if demand-random? [
     ask consumers [
@@ -233,10 +232,7 @@ to setup
     ]
   ]
 
-  ; zero change counter
-  set n-strategical-changes 0
-  set n-tactical-changes 0
-
+  ; start recording the map window
   if video? [
     export-view "stravvs_view_0.png"
     export-interface "stravvs_interface_0.png"
@@ -245,24 +241,16 @@ end
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
 ;
 ; Go
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; {observer} go
-;
+; {} go
 ; Schedule of actions that make the consumers 'suck' goods through
 ; the value network.
 
 to go
-;print ticks
-  ; When running in headless mode, if an error has occurred we don't
-  ; want to keep running
-
   if not error-state? [
-
     ; rezero order tables
     table:clear things-ordered    ; table of products ordered
     table:clear things-made       ; table of products made
@@ -284,10 +272,9 @@ to go
       ask consumers [ consumer-want ticks ]
     ]
 
-
-       ; transporters make deliveries
+    ; transporters make deliveries
     ask transporters [
-      if verbose? [print "Deliver A -----------------------------"     ]
+      if verbose? [print "Deliver A -----------------------------"]
       make-instant-deliveries
     ]
 
@@ -298,22 +285,19 @@ to go
 
     ; processors make orders
     ask processors with [closed = FALSE AND table:length orders > 0][
-      if verbose? [print "Processer orders -----------------------------"        ]
+      if verbose? [print "Processer orders -----------------------------"]
       make-orders
     ]
 
     ; processors make goods
     ask processors with [closed = FALSE AND table:length orders > 0] [
-      if verbose? [print "make goods -----------------------------"      ]
+      if verbose? [print "make goods -----------------------------"]
       ; update the current capacity for each linked process
       set capacity table:make
       foreach [name] of out-implement-neighbors [ x -> table:put capacity x get-capacity-process x [stock-summary] of self]
 
-      ;update-orders ; update the count-down timer until new orders are made
-      let greenlight can-run? orders
-
-      ;;; BEN ;;; returns vector of which table:keys orders can be run
-      ;; need to loop through keys and update each order for that product
+      let greenlight can-run-order? orders
+      ;; loop through keys and update each order for that product
       if length greenlight > 0 [
         foreach greenlight [ invoice ->
           ; current order list for goods = invoice
@@ -332,10 +316,6 @@ to go
       if verbose? [print "fulfill orders -----------------------------"     ]
       fulfil-orders
       satisfied-order
-      ; consolidate remaining stock
-      ;consolidate-stock ; merge similar stock & delete excess agents
-
-;print (sentence ticks " " self " " stock-summary " | budget " budget " | orders " orders " | ordered " ordered)
     ]
 
     ; transporters make deliveries
@@ -353,14 +333,9 @@ to go
       consolidate-stock ; merge similar stock & delete excess agents
     ]
 
-    ;    ask processors [
-    ;      consolidate-stock ; merge similar stock & delete excess agents
-    ;    ]
   ]
 
-  ; save the outputs to a text files
-  ;output-data
-
+  ; advance the time counter
   tick
 
   ; tidy up processors
@@ -378,46 +353,23 @@ to go
     ; reset annual dormant counter
     set dormant 0
 
-
+    ;; Review processor behaviours
     ;----- tactics -----;
     ;; annual review of tactics
     if (ticks mod (convert-time 1 "year")) = 0 AND review-tactics? [
-
-      ;print (sentence "GO - end of year review, count of implements: " count my-implements)
       check-tactics
 
       ;; update memory for local case-base of what was just completed
-      ; only do this periodically to prevent the casebase unnecessarily
-      ; duplicating every step, e.g. when there is/could be a change
       update-memory true
     ]
 
     ;----- strategy -----;
     ; either the processor has been dormant too long OR they've tried lots too many changes
-    ;if ((dormant > max-dormant) OR (long-budget < max-change)) [
     if (((dormant > max-dormant) OR (changed > max-changes))) AND review-strategy? [
-      print (sentence ticks " " self  " dormant: " dormant " v " max-dormant " | long-budget " long-budget " v " max-change "  | " changed " v " max-changes)
       check-strategy
 
       ;; update memory for local case-base of what was just completed
-      ; only do this periodically to prevent the casebase unnecessarily
-      ; duplicating every step, e.g. when there is/could be a change
       update-memory true
-    ]
-
-
-    ;; long-term review of strategy
-    ifelse budget < 0 [
-      ;; accumulate negative budgets
-      ;; set long-budget long-budget + budget
-    ][
-      ;; ask processors to invest (increase capacity) if
-      ;; budget surplus
-      ;      if reset-capacity? [
-      ;        ;; need to identify which process
-      ;        ;table:put capacity ratelimit
-      ;      ]
-      ;if re-invest? [invest]
     ]
 
     ;; tally how long there have been no orders
@@ -432,10 +384,10 @@ to go
     ]
 
     ;; kill off if changed too often
-    if changed > max-changes [; tally times changed and kill if too many
+    if changed > max-changes [
+      ; tally times changed and kill if too many
       set closed TRUE
       set color 5 ;grey
-                  ;kill-off
 
       ; close consumers too
       ask consumers-here [
@@ -450,13 +402,8 @@ to go
     depreciate
   ]
 
-
-
+  ; update output tables
   if output? [
-    ;    if (ticks mod 10) = 0 [
-    ;      output-results
-    ;    ]
-
     output-results-table
 
     table:clear output-used
@@ -465,11 +412,10 @@ to go
     table:clear output-imported
   ]
 
+  ; print index procssor
   if print-index? [
     print (word "\n")
     print (sentence "Time: " ticks)
-    ;print [orders] of index-case
-    ;ask index-case [print (word "Running: " [name] of out-implement-neighbors " " budget)]
     ask index-case [
       print (sentence self " Running " running)
     ]
@@ -483,22 +429,14 @@ to go
     export-interface (word "stravvs_interface_" ticks ".png")
   ]
 
-
-
-
-  ;print (sentence [demand] of one-of consumers " -> " [consumption] of one-of consumers " + "  [unfulfilled-demand] of one-of consumers)
-  ;print (sentence sum [amount] of products with [product-type = "B" AND NOT (shelflife = "archetype")])
-
 end
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
 ;
 ; GUI helpers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+; {} product-clr
+; set reusable and consistent colours for product plotting
 to product-clr
   set product-colour table:make
 
@@ -507,6 +445,8 @@ to product-clr
   ]
 end
 
+; {} equation-clr
+; set reusable and consistent colours for process plotting
 to equation-clr
   set equation-colour table:make
 
@@ -516,18 +456,20 @@ to equation-clr
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
 ;
 ; Standardized message output
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; {} output-error
+; print output error
 to output-error [string]
   output-print (word "ERROR [" timer "]: " string)
   set error-state? true
   error string
 end
 
+; {} output-warning
+; print output warning
 to output-warning [string]
   if warnings = 0 [
     set warnings table:make
@@ -540,6 +482,8 @@ to output-warning [string]
   ]
 end
 
+; {} output-note
+; print output note
 to output-note [string]
   if notes = 0 [
     set notes table:make
@@ -552,13 +496,20 @@ to output-note [string]
   ]
 end
 
+; {} print-progress
+; print progress
 to print-progress [string]
   print (word "PROGRESS [" timer "]: " string)
 end
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Monitors & Save outputs
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; print output to see products in the graph in an R-suitable format
+; {} output-data
+; print output to see products in the graph in an R-suitable format
 to output-data
   let result []
   foreach table:keys product-values [ x ->
@@ -578,9 +529,8 @@ to output-data
   ]
 end
 
-
-;; population table of all products (as keys) with a list of ingredients for each
-;; BEN ;; change this to look at products based on links
+;{} product-table
+; population table of all products (as keys) with a list of ingredients for each
 to product-table
   ; allocate space for the products table that details all products and their ingredients
   set product-types table:make
@@ -621,18 +571,18 @@ to product-table
   ]
 end
 
+; {} n-business-shut
+; count closed businesses
 to-report n-business-shut
   report count processors with [closed = TRUE]
 end
-
-;to-report n-business-changed
-;  report n-changed
-;end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; monitor attributes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; {} counts
+; tally the counters for printing
 to-report counts
 
   ;; processors
@@ -670,20 +620,24 @@ to-report counts
   report (word Norders " " Nrunning " " Nbought " | " Ndemand " " Nconsumption " " Nunfulfilled-demand " " Nbought2 " | " Nsuppliers " " Nproducts " " Nturtles " " Nstocks)
 end
 
-
+; {} frequency
+; make a frequency table
 ; adapted from https://stackoverflow.com/questions/32100378/count-the-number-of-occurrences-of-each-item-in-a-list
 to-report frequency [an-item a-list]
   report length (filter [ i -> i = an-item] a-list)
 end
 
+; {} partial-sums
+; cummulative sum
 ; from https://stackoverflow.com/questions/33570658/how-make-a-list-of-cumulative-sum-in-netlogo
 to-report partial-sums [lst]
   report butfirst reduce [[result-so-far next-item] -> lput (next-item + last
     result-so-far) result-so-far] fput [0] lst
 end
 
+; {} outtab
+; print outputs
 to-report outtab [table-name]
-
   let out-order ""
   foreach products-unique [ i ->
     ifelse table:has-key? table-name i [
@@ -693,17 +647,17 @@ to-report outtab [table-name]
     ]
   ]
   report  out-order
-  ;report (sentence map [ x ->  (word item 0 x "|" item 1 x) ] table:to-list table-name)
 end
 
-
-
+; {} N-table
+; tabulate products
 to-report N-table [table-name]
   report map [i -> (word table-name "_" i)] products-unique
 end
 
 
-
+; {} output-results
+; print output tables
 to output-results
   ; number of each equation run
   let eq []
@@ -730,6 +684,8 @@ to output-results
   ])
 end
 
+; {} output-results-tables
+; print output tables
 to output-results-table ;[title-order]
   if not file-exists? output-file [
     file-open output-file
@@ -778,7 +734,8 @@ to output-results-table ;[title-order]
   file-close
 end
 
-
+; {} output-update
+; output tables
 to output-update [the-table the-thing the-amount]
   if not table:has-key? the-table the-thing [
     table:put the-table the-thing 0
@@ -787,7 +744,8 @@ to output-update [the-table the-thing the-amount]
   table:put the-table the-thing (previous + the-amount)
 end
 
-
+; {} output-save
+; save output tables
 to-report output-save
   let out []
   ; list how much of each product is in each stage of production
@@ -814,8 +772,8 @@ to-report output-save
   ; equations are not always run, but if not then they do not appear in the things-run table
   foreach [name] of processes [ x ->
     ifelse table:has-key? things-run x [ ; if it was recorded
-    set quantity table:get things-run x
-    set out lput (sentence "equation " x " " quantity) out
+      set quantity table:get things-run x
+      set out lput (sentence "equation " x " " quantity) out
     ][ ; if it was NOT recorded
       set quantity 0
       set out lput (sentence "equation " x " " quantity) out
@@ -827,10 +785,10 @@ to-report output-save
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-4
-78
-644
-719
+5
+150
+645
+791
 -1
 -1
 19.152
@@ -854,10 +812,10 @@ ticks
 30.0
 
 BUTTON
-5
-42
-71
-75
+10
+40
+76
+73
 NIL
 setup
 NIL
@@ -871,10 +829,10 @@ NIL
 1
 
 BUTTON
-72
-42
-135
-75
+77
+40
+140
+73
 step
 go
 NIL
@@ -888,10 +846,10 @@ NIL
 0
 
 BUTTON
-136
-42
-199
-75
+141
+40
+204
+73
 NIL
 go
 T
@@ -910,7 +868,7 @@ INPUTBOX
 878
 460
 run-seed
-1.684485135E9
+2.139908554E9
 1
 0
 Number
@@ -931,18 +889,18 @@ TEXTBOX
 10
 323
 36
-STRAVVS (version 1.0)
+STRAVVS (version 2.0)
 24
 0.0
 1
 
 BUTTON
-202
-42
-348
-75
+207
+40
+353
+73
 profile (100 steps)
-setup                  ;; set up the model\nprofiler:start         ;; start profiling\nrepeat 100 [ go ]       ;; run something you want to measure\nprofiler:stop          ;; stop profiling\nprint profiler:report  ;; view the results\nprofiler:reset         ;; clear the data
+setup                  ;; set up the model\nprofiler:start         ;; start profiling\nrepeat 100 [ go ]       ;; run something you want to measure\nprofiler:stop          ;; stop profiling\nprint profiler:report  ;; view the results\nprofiler:reset         ;; clear the data\n\nprint mgr:cpu-time-str ;;The total amount of CPU time all threads have been running for\nprint mgr:mem-str ;;The heap and non-heap memory used in a human-readable string.\n\n\n
 NIL
 1
 T
@@ -960,14 +918,14 @@ PLOT
 991
 Ordered
 NIL
-count
+log10
 0.0
 10.0
 0.0
-30.0
+5.0
 true
 false
-"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-ordered [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity table:get things-ordered x\n  ifelse quantity > 0 [\n    plotxy ticks  quantity ]\n    [ \n    plotxy ticks 0 \n  ]\n]\n\n"
+"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-ordered [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity table:get things-ordered x\n  ifelse quantity > 0 [\n    plotxy ticks  log quantity 10 ]\n    [ \n    plotxy ticks 0 \n  ]\n]\n\n"
 PENS
 
 PLOT
@@ -977,14 +935,14 @@ PLOT
 989
 Made
 NIL
-Count
+log10
 0.0
 10.0
 0.0
-30.0
+5.0
 true
 false
-"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-made [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n    ;plot count products with [product-type = x]\n  let quantity table:get things-made x\n  ifelse quantity > 0 [\n    plotxy ticks  quantity]\n    [ \n    plotxy ticks 0 \n  ]\n\n]\n\n"
+"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-made [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n    ;plot count products with [product-type = x]\n  let quantity table:get things-made x\n  ifelse quantity > 0 [\n    plotxy ticks  log quantity 10]\n    [ \n    plotxy ticks 0 \n  ]\n\n]\n\n"
 PENS
 
 PLOT
@@ -994,20 +952,20 @@ PLOT
 989
 Delivered
 NIL
-Count
+log10
 0.0
 10.0
 0.0
-30.0
+5.0
 true
 false
-"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-delivered [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity table:get things-delivered x\n  ifelse quantity > 0 [\n    plotxy ticks  quantity ]\n    [ \n    plotxy ticks 0 \n  ]\n\n]\n\n"
+"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-delivered [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity table:get things-delivered x\n  ifelse quantity > 0 [\n    plotxy ticks  log quantity 10]\n    [ \n    plotxy ticks 0 \n  ]\n\n]\n\n"
 PENS
 
 PLOT
 6
 994
-609
+1011
 1138
 Producer budgets
 NIL
@@ -1029,28 +987,28 @@ PLOT
 990
 Consumed
 NIL
-Count
+log10
 0.0
 10.0
 0.0
 5.0
 true
 false
-"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-consumed [ x ->\n  set-current-plot-pen (word x)\n  set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity table:get things-consumed x\n  ifelse quantity > 0 [\n    plotxy ticks  quantity]\n    [ \n    ;plotxy ticks 0 \n  ]\n\n]\n\n"
+"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-consumed [ x ->\n  set-current-plot-pen (word x)\n  set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity table:get things-consumed x\n  ifelse quantity > 0 [\n    plotxy ticks  log quantity 10]\n    [ \n    ;plotxy ticks 0 \n  ]\n\n]\n\n"
 PENS
 
 PLOT
-612
-993
 810
-1138
+845
+1008
+990
 imported
 NIL
 log 10
 0.0
 10.0
 0.0
-10.0
+5.0
 true
 false
 "foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-imported [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity table:get things-imported x\n  ifelse quantity > 0 [\n    plotxy ticks  log quantity 10 ]\n    [ \n    plotxy ticks 0 \n  ]\n]\n\n"
@@ -1068,10 +1026,10 @@ system3/inits.txt
 String
 
 MONITOR
-816
-1093
-873
-1138
+115
+795
+172
+840
 Closed
 n-business-shut
 17
@@ -1079,10 +1037,10 @@ n-business-shut
 11
 
 BUTTON
-289
-754
-384
-787
+290
+105
+385
+138
 who what?
 let nprint 10\n(ifelse count processors > 10 [\nset nprint 10\n][\nset nprint count processors\n])\n\nprint (word \"Printing \" nprint \" processors...\")\n\nask n-of nprint processors [\n  ifelse closed = TRUE [\n    print (word self \" does: \")\n    print (word \"CLOSED\")\n    print (word \"\\n\")\n  ][\n    print (word self \" does: \")\n    ask out-implement-neighbors[ print name]\n    print (word \" has: \" )\n    print stock-summary\n    print (word \" asked by: \" orders)\n    print (word \" asking for: \" ordered)\n    print (word \"\\n\")\n  ]\n]
 NIL
@@ -1140,10 +1098,10 @@ max-changes
 Number
 
 SWITCH
-1148
-1081
-1294
-1114
+1335
+1080
+1481
+1113
 output?
 output?
 1
@@ -1151,10 +1109,10 @@ output?
 -1000
 
 BUTTON
-383
-754
-478
-787
+384
+105
+479
+138
 suppliers?
 foreach table:keys product-types [ x ->\n  let get-suppliers []\n  ifelse suppliers-of x != nobody [\n    ask suppliers-of x [\n      set get-suppliers lput (word breed \" (\" [who] of self \")\") get-suppliers\n    ]\n    ][\n      set get-suppliers \"nobody\"\n    ]\n  print (sentence x \" -> \" get-suppliers)\n]
 NIL
@@ -1168,10 +1126,10 @@ NIL
 1
 
 SWITCH
-817
-849
-939
-882
+860
+725
+982
+758
 print-index?
 print-index?
 1
@@ -1190,10 +1148,10 @@ beef.meat.kg
 String
 
 BUTTON
-101
-754
-197
-787
+102
+105
+198
+138
 equation-costs
 ask processes [ \n  let costs 0\n  ask in-input-neighbors [\n    set costs costs + (amount * item 0 table:get product-values product-type)\n    ;print (sentence myself \" \" self \" \" product-type \" \" item 0 table:get product-values product-type)\n  ]\n  \n  let cat-costs 0\n  ask in-catalyst-neighbors [\n    ; catalyst costs / shelflife\n    set cat-costs cat-costs + (amount * (item 0 table:get product-values product-type) / (item 1 table:get product-values product-type))\n    ;print (sentence myself \" \" self \" \" product-type \" \" item 0 table:get product-values product-type)\n  ]\n  \n  let income 0\n  ask out-output-neighbors [\n    set income income + (amount * item 0 table:get product-values product-type)\n    ;print (sentence myself \" \" self \" \" product-type \" \" item 0 table:get product-values product-type)\n  ]\n  \n  print (sentence name \":  -\" costs \"[ -\" cat-costs \" ] +\" income \" = \" (0 - costs - cat-costs + income))\n]
 NIL
@@ -1322,7 +1280,7 @@ INPUTBOX
 1842
 414
 tactical-choice
-cbr-local
+rbb
 1
 0
 String
@@ -1333,7 +1291,7 @@ INPUTBOX
 1842
 475
 strategical-choice
-cbr
+rbb
 1
 0
 String
@@ -1658,17 +1616,17 @@ strategy-compare
 strategy-compare
 0
 100
-7.0
+3.0
 1
 1
 %
 HORIZONTAL
 
 MONITOR
-873
-1093
-947
-1138
+172
+795
+246
+840
 Strategies
 n-strategical-changes
 17
@@ -1676,10 +1634,10 @@ n-strategical-changes
 11
 
 MONITOR
-947
-1093
-1004
-1138
+246
+795
+303
+840
 Tactics
 n-tactical-changes
 17
@@ -1693,7 +1651,7 @@ SWITCH
 633
 use-regulator-file?
 use-regulator-file?
-1
+0
 1
 -1000
 
@@ -1703,16 +1661,16 @@ INPUTBOX
 1268
 695
 regulator-file
-scotland/regulators.csv
+system3/regulators.csv
 1
 0
 String
 
 SWITCH
-817
-915
-938
-948
+860
+791
+981
+824
 testing?
 testing?
 1
@@ -1720,10 +1678,10 @@ testing?
 -1000
 
 INPUTBOX
-1621
-728
-1701
-788
+1620
+795
+1700
+855
 n-choices
 3.0
 1
@@ -1731,10 +1689,10 @@ n-choices
 Number
 
 SWITCH
-1148
-1182
-1251
-1215
+1335
+1181
+1438
+1214
 video?
 video?
 1
@@ -1742,10 +1700,10 @@ video?
 -1000
 
 BUTTON
-6
-754
-102
-787
+7
+105
+103
+138
 things-done
 print (word \"\\n\")\nprint (word ticks)\nprint (word \"Ordered   \" things-ordered)\nprint (word \"Imported  \" things-imported)\nprint (word \"Made      \" things-made)\nprint (word \"Delivered \" things-delivered)\nprint (word \"Consumed  \" things-consumed)
 NIL
@@ -1776,7 +1734,7 @@ SWITCH
 551
 review-strategy?
 review-strategy?
-1
+0
 1
 -1000
 
@@ -1792,10 +1750,10 @@ review-subsidy?
 -1000
 
 INPUTBOX
-1147
-1118
-1376
-1178
+1334
+1117
+1563
+1177
 output-dir
 scotland
 1
@@ -1814,10 +1772,10 @@ max-capacity?
 -1000
 
 SWITCH
-817
-882
-938
-915
+860
+758
+981
+791
 verbose?
 verbose?
 1
@@ -1825,20 +1783,20 @@ verbose?
 -1000
 
 TEXTBOX
-1623
-584
-1773
-602
+1620
+650
+1770
+668
 CBR
 11
 0.0
 1
 
 INPUTBOX
-1621
-603
-1708
-663
+1620
+670
+1707
+730
 key-match
 5.0
 1
@@ -1846,10 +1804,10 @@ key-match
 Number
 
 INPUTBOX
-1621
-665
-1707
-725
+1620
+732
+1706
+792
 value-match
 3.0
 1
@@ -1868,10 +1826,10 @@ restockON-rescaleOFF
 -1000
 
 BUTTON
-196
-754
-291
-787
+197
+105
+292
+138
 show-capacity
 ask processors [ show capacity ]
 NIL
@@ -1885,10 +1843,10 @@ NIL
 1
 
 SWITCH
-1621
-792
-1760
-825
+1620
+859
+1759
+892
 multi-match?
 multi-match?
 0
@@ -2037,70 +1995,158 @@ UTILITY FUNCTIONS
 1
 
 TEXTBOX
-11
-816
-161
-836
+10
+805
+160
+825
 OUTPUTS
 16
 0.0
 1
 
 TEXTBOX
-1149
-1052
-1299
-1072
+1336
+1051
+1486
+1071
 SAVE
 16
 0.0
 1
 
 TEXTBOX
-11
-730
-161
-750
+12
+81
+162
+101
 CHECKS
 16
 0.0
 1
 
+INPUTBOX
+1615
+555
+1844
+615
+neighborhood-choice
+jaccard
+1
+0
+String
+
+BUTTON
+470
+40
+532
+73
+test
+ \n let me one-of processors\n  ; list of things that I own\n  let A table:keys ([stock-summary] of me)\n  \n  print me\n  print A\n  \n  let jac []\n  ; ask all processes what they require\n  ask processes [          \n    let B map [x -> item 0 x] [get-inputs] of self\n    let C map [x -> item 0 x] [get-catalysts] of self\n    ; calculate the Jaccard distance\n    let J jaccard-distance A (sentence B C)\n    set jac lput (list name J) jac\n    \n  ]\n  ; sorted list of [who distance]\n  set jac sort-by [ [i ii] -> item 1 i < item 1 ii ] jac\n  \n  print jac\n  \n  ; minimum distance\n  let min-dist min map [pair -> item 1 pair] jac\n  print min-dist\n  \n  ; list of who-IDs for processors matching the minimum\n  let closest-ids map [pair -> item 0 pair] filter [pair -> item 1 pair = min-dist] jac\n  print one-of closest-ids\n  
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+555
+40
+657
+73
+test-
+ask processors [\n let me self\n  ask implement-neighbors [\n    show can-process? me\n  ]\n]
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+MONITOR
+645
+675
+705
+720
+Month:
+current-month
+0
+1
+11
+
+MONITOR
+645
+630
+705
+675
+Year:
+current-year
+17
+1
+11
+
+PLOT
+1020
+970
+1220
+1120
+Product Quantity
+NIL
+log10
+0.0
+10.0
+0.0
+5.0
+true
+false
+"foreach table:keys product-types [ x ->\n    create-temporary-plot-pen (word x)\n    ;set-plot-pen-color one-of base-colors\n    set-plot-pen-color table:get product-colour x\n]" "foreach table:keys things-ordered [ x ->\n  set-current-plot-pen (word x)\n    set-plot-pen-mode 2; points\n  ;plot count products with [product-type = x]\n  let quantity (sum [amount] of products with [product-type = x])\n  ifelse quantity > 0 [\n    plotxy ticks  log quantity 10]\n    [ \n    plotxy ticks 0 \n  ]\n]\n\n"
+PENS
+
 @#$#@#$#@
-# STRAVVS Documentation
+# STRAVVS v2.0 Documentation
 
 ## WHAT IS IT?
 
-STRAVVS is a model of value chains, built for the Integrated Socio-Environmental Modelling of Policy Scenarios for Scotland project: 
-https://large-scale-modelling.hutton.ac.uk/
-but intended for wider possible application. It simulates consumers whose demand for products causes processors to run the processes that create them. It also simulates the transportation of the goods, representing the whole network of a value system as far as is desired.
+We present an implementation of Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS) – a middle-range theory of value systems that we formalise here as an agent-based modelling framework. STRAVVS is designed to simulate demand-driven interactions between heterogeneous resource-transforming agents embedded in networks of value exchange. It is grounded in a generalised ontology that supports application across diverse domains in which material value is produced, transformed, or transferred. By treating STRAVVS as a theory of the middle range (à la Merton),  we aim to bridge the gap between narrowly empirical models and abstract theoretical formulations, offering a flexible but structured foundation for simulating real-world value networks.
+
+STRAVVS was built for the Integrated Socio-Environmental Modelling of Policy Scenarios for Scotland project: https://large-scale-modelling.hutton.ac.uk/ 
 
 ## HOW IT WORKS
 
-Using configuration files, a network of processes is created that consume ingredients and use 'catalysts' to make end-user products. Processors are assigned to these processes, and importer agents created to bring products into the system that are not made within it. Consumers are then created that demand the end-user products from the processors that make them. This demand drives the value system to manufacture the end-user products via any intermediary products, thereby drawing goods through the value network.
+STRAVVS models businesses (Processors) as actors that fulfil demand – whether from Consumers or from other Processors – by implementing Processes that convert Inputs into Outputs, using Catalysts. Inputs, Outputs, and Catalysts are all reified relations between Processes and Resources, which serve as the model’s generalised representation of physical resources. To reflect the importance of resource movement in economic systems – both as a functional necessity and a contributor to resource consumption – the ontology also includes Transporters, which move Resources between agents. In cases where a Resource is not created by any Processors within the network, it can be introduced by an Importer agent. The resulting model structure forms a directed network of material transformations, which may be predominantly acyclic in linear supply chains, or increasingly cyclic as systems evolve toward circular economy configurations. STRAVVS does not prescribe which Processors select which Processes to run, or which other agents to transact with; such decisions are defined at the level of the case study, allowing behaviours to be tailored to empirical data, heuristics, or scenario logic.
+
+The running order is:
+  * consumers make orders for goods
+  * processors make orders with upstream suppliers
+  * processors make goods
+  * transporters make deliveries
+  * consumers consume
+  * processors review tactial (short-term) and strategic (long-term) behaviours
 
 ## HOW TO USE IT
 
-The model requires a file containing equations and a file containing agents.
+The model requires a file containing equations (processes) and a file containing agents (processors, consumers, importers).
 
 If `instant-transport?` is `Off` then transporter agents drive the goods (not, currently, in any especially 'smart' way) from one place to another. If `On`, then the transporter agents are hidden, and transportation of goods takes place instantly.
 
 ## THINGS TO NOTICE
 
-The main thing to notice at present is all the transporters sending goods everywhere when `instant-transport?` is `Off`. You can also see the stock of importers, processors and consumers in a 'ring' around them. Useful potential visualizations to implement include:
-
-  * Reflecting the extent to which different transportation links are used
-  * Volumes of goods imported each time step
-  * Volumes of goods consumed each time step
-  * Volumes of goods manufactured each time step
-  * Volumes of goods transported each time step
-  * Transport distances for each good (would need more information recorded)
-  * Volumes of 'byproducts' (that no-one uses)
-  * Laden and unladen distances travelled by transporters
+  * Dynamics of interest include the balance of input and output costs
+  * Stability of the system of equations 
+  * Bottlenecks in production
+  * Balance between endogenous production and exogenous supply of goods (imported)
+  * Temporal pattern of supply given constraints on processes
+  * Distribution of production
 
 ## THINGS TO TRY
 
-(suggested things for the user to try to do (move sliders, switches, etc.) with the model)
+Changing the logic of how suppliers are selected can influence who else gets triggered in supply chains. Changing the initial budgets and costs of goods can influence the budgets and sustainability of processors.
 
 ## EXTENDING THE MODEL
 
@@ -2130,686 +2176,699 @@ At this stage, the implementation is highly simplified. The model needs the foll
 
 This work was funded by the Scottish Government’s Rural and Environment Science Analytical Services Strategic Research Programme (JHI-C5-1)
 
-## CREDITS AND REFERENCES
+## References
 
-STRAVVS was designed and built by Garry Polhill (JHI), Ben McCormick (RI) and Nick Roxburgh (JHI)
+Polhill, G., McCormick, B.J.J., Roxburgh, N., Assefa, S., Matthews, K., 2024. A ‘Theory of the Middle Range’ to Support Food Security and Circular Economy Value Chain Scenario Analysis, in: Elsenbroich, C., Verhagen, H. (Eds.), Advances in Social Simulation, Springer Proceedings in Complexity. Springer Nature Switzerland, Cham, pp. 177–186. https://doi.org/10.1007/978-3-031-57785-7_15
+
+## How to Cite
+
+Benjamin JJ McCormick, Nick Roxburgh, and Gary Polhill (2026) STRAVVS: A flexible agent-based modelling framework for simulating dynamic value chain networks. _Zenodo_
+
+Contact 
+Ben McCormick
+Rowett Institute, University of Aberdeen, Ashgrove Rd. W, Aberdeen AB25
+2ZD, UK
+benjamin.mccormick@abdn.ac.uk
 
 # LICENCE
-```text
-                        GNU GENERAL PUBLIC LICENSE
-                           Version 3, 29 June 2007
-    
-     Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>
-     Everyone is permitted to copy and distribute verbatim copies
-     of this license document, but changing it is not allowed.
-    
-                                Preamble
-    
-      The GNU General Public License is a free, copyleft license for
-    software and other kinds of works.
-    
-      The licenses for most software and other practical works are designed
-    to take away your freedom to share and change the works.  By contrast,
-    the GNU General Public License is intended to guarantee your freedom to
-    share and change all versions of a program--to make sure it remains free
-    software for all its users.  We, the Free Software Foundation, use the
-    GNU General Public License for most of our software; it applies also to
-    any other work released this way by its authors.  You can apply it to
-    your programs, too.
-    
-      When we speak of free software, we are referring to freedom, not
-    price.  Our General Public Licenses are designed to make sure that you
-    have the freedom to distribute copies of free software (and charge for
-    them if you wish), that you receive source code or can get it if you
-    want it, that you can change the software or use pieces of it in new
-    free programs, and that you know you can do these things.
-    
-      To protect your rights, we need to prevent others from denying you
-    these rights or asking you to surrender the rights.  Therefore, you have
-    certain responsibilities if you distribute copies of the software, or if
-    you modify it: responsibilities to respect the freedom of others.
-    
-      For example, if you distribute copies of such a program, whether
-    gratis or for a fee, you must pass on to the recipients the same
-    freedoms that you received.  You must make sure that they, too, receive
-    or can get the source code.  And you must show them these terms so they
-    know their rights.
-    
-      Developers that use the GNU GPL protect your rights with two steps:
-    (1) assert copyright on the software, and (2) offer you this License
-    giving you legal permission to copy, distribute and/or modify it.
-    
-      For the developers' and authors' protection, the GPL clearly explains
-    that there is no warranty for this free software.  For both users' and
-    authors' sake, the GPL requires that modified versions be marked as
-    changed, so that their problems will not be attributed erroneously to
-    authors of previous versions.
-    
-      Some devices are designed to deny users access to install or run
-    modified versions of the software inside them, although the manufacturer
-    can do so.  This is fundamentally incompatible with the aim of
-    protecting users' freedom to change the software.  The systematic
-    pattern of such abuse occurs in the area of products for individuals to
-    use, which is precisely where it is most unacceptable.  Therefore, we
-    have designed this version of the GPL to prohibit the practice for those
-    products.  If such problems arise substantially in other domains, we
-    stand ready to extend this provision to those domains in future versions
-    of the GPL, as needed to protect the freedom of users.
-    
-      Finally, every program is threatened constantly by software patents.
-    States should not allow patents to restrict development and use of
-    software on general-purpose computers, but in those that do, we wish to
-    avoid the special danger that patents applied to a free program could
-    make it effectively proprietary.  To prevent this, the GPL assures that
-    patents cannot be used to render the program non-free.
-    
-      The precise terms and conditions for copying, distribution and
-    modification follow.
-    
-                           TERMS AND CONDITIONS
-    
-      0. Definitions.
-    
-      "This License" refers to version 3 of the GNU General Public License.
-    
-      "Copyright" also means copyright-like laws that apply to other kinds of
-    works, such as semiconductor masks.
-    
-      "The Program" refers to any copyrightable work licensed under this
-    License.  Each licensee is addressed as "you".  "Licensees" and
-    "recipients" may be individuals or organizations.
-    
-      To "modify" a work means to copy from or adapt all or part of the work
-    in a fashion requiring copyright permission, other than the making of an
-    exact copy.  The resulting work is called a "modified version" of the
-    earlier work or a work "based on" the earlier work.
-    
-      A "covered work" means either the unmodified Program or a work based
-    on the Program.
-    
-      To "propagate" a work means to do anything with it that, without
-    permission, would make you directly or secondarily liable for
-    infringement under applicable copyright law, except executing it on a
-    computer or modifying a private copy.  Propagation includes copying,
-    distribution (with or without modification), making available to the
-    public, and in some countries other activities as well.
-    
-      To "convey" a work means any kind of propagation that enables other
-    parties to make or receive copies.  Mere interaction with a user through
-    a computer network, with no transfer of a copy, is not conveying.
-    
-      An interactive user interface displays "Appropriate Legal Notices"
-    to the extent that it includes a convenient and prominently visible
-    feature that (1) displays an appropriate copyright notice, and (2)
-    tells the user that there is no warranty for the work (except to the
-    extent that warranties are provided), that licensees may convey the
-    work under this License, and how to view a copy of this License.  If
-    the interface presents a list of user commands or options, such as a
-    menu, a prominent item in the list meets this criterion.
-    
-      1. Source Code.
-    
-      The "source code" for a work means the preferred form of the work
-    for making modifications to it.  "Object code" means any non-source
-    form of a work.
-    
-      A "Standard Interface" means an interface that either is an official
-    standard defined by a recognized standards body, or, in the case of
-    interfaces specified for a particular programming language, one that
-    is widely used among developers working in that language.
-    
-      The "System Libraries" of an executable work include anything, other
-    than the work as a whole, that (a) is included in the normal form of
-    packaging a Major Component, but which is not part of that Major
-    Component, and (b) serves only to enable use of the work with that
-    Major Component, or to implement a Standard Interface for which an
-    implementation is available to the public in source code form.  A
-    "Major Component", in this context, means a major essential component
-    (kernel, window system, and so on) of the specific operating system
-    (if any) on which the executable work runs, or a compiler used to
-    produce the work, or an object code interpreter used to run it.
-        
-      The "Corresponding Source" for a work in object code form means all
-    the source code needed to generate, install, and (for an executable
-    work) run the object code and to modify the work, including scripts to
-    control those activities.  However, it does not include the work's
-    System Libraries, or general-purpose tools or generally available free
-    programs which are used unmodified in performing those activities but
-    which are not part of the work.  For example, Corresponding Source
-    includes interface definition files associated with source files for
-    the work, and the source code for shared libraries and dynamically
-    linked subprograms that the work is specifically designed to require,
-    such as by intimate data communication or control flow between those
-    subprograms and other parts of the work.
-    
-      The Corresponding Source need not include anything that users
-    can regenerate automatically from other parts of the Corresponding
-    Source.
-    
-      The Corresponding Source for a work in source code form is that
-    same work.
-    
-      2. Basic Permissions.
-    
-      All rights granted under this License are granted for the term of
-    copyright on the Program, and are irrevocable provided the stated
-    conditions are met.  This License explicitly affirms your unlimited
-    permission to run the unmodified Program.  The output from running a
-    covered work is covered by this License only if the output, given its
-    content, constitutes a covered work.  This License acknowledges your
-    rights of fair use or other equivalent, as provided by copyright law.
-    
-      You may make, run and propagate covered works that you do not
-    convey, without conditions so long as your license otherwise remains
-    in force.  You may convey covered works to others for the sole purpose
-    of having them make modifications exclusively for you, or provide you
-    with facilities for running those works, provided that you comply with
-    the terms of this License in conveying all material for which you do
-    not control copyright.  Those thus making or running the covered works
-    for you must do so exclusively on your behalf, under your direction
-    and control, on terms that prohibit them from making any copies of
-    your copyrighted material outside their relationship with you.
-    
-      Conveying under any other circumstances is permitted solely under
-    the conditions stated below.  Sublicensing is not allowed; section 10
-    makes it unnecessary.
-    
-      3. Protecting Users' Legal Rights From Anti-Circumvention Law.
-    
-      No covered work shall be deemed part of an effective technological
-    measure under any applicable law fulfilling obligations under article
-    11 of the WIPO copyright treaty adopted on 20 December 1996, or
-    similar laws prohibiting or restricting circumvention of such
-    measures.
-    
-      When you convey a covered work, you waive any legal power to forbid
-    circumvention of technological measures to the extent such circumvention
-    is effected by exercising rights under this License with respect to
-    the covered work, and you disclaim any intention to limit operation or
-    modification of the work as a means of enforcing, against the work's
-    users, your or third parties' legal rights to forbid circumvention of
-    technological measures.
-    
-      4. Conveying Verbatim Copies.
-    
-      You may convey verbatim copies of the Program's source code as you
-    receive it, in any medium, provided that you conspicuously and
-    appropriately publish on each copy an appropriate copyright notice;
-    keep intact all notices stating that this License and any
-    non-permissive terms added in accord with section 7 apply to the code;
-    keep intact all notices of the absence of any warranty; and give all
-    recipients a copy of this License along with the Program.
-    
-      You may charge any price or no price for each copy that you convey,
-    and you may offer support or warranty protection for a fee.
-    
-      5. Conveying Modified Source Versions.
-    
-      You may convey a work based on the Program, or the modifications to
-    produce it from the Program, in the form of source code under the
-    terms of section 4, provided that you also meet all of these conditions:
-    
-        a) The work must carry prominent notices stating that you modified
-        it, and giving a relevant date.
-    
-        b) The work must carry prominent notices stating that it is
-        released under this License and any conditions added under section
-        7.  This requirement modifies the requirement in section 4 to
-        "keep intact all notices".
-    
-        c) You must license the entire work, as a whole, under this
-        License to anyone who comes into possession of a copy.  This
-        License will therefore apply, along with any applicable section 7
-        additional terms, to the whole of the work, and all its parts,
-        regardless of how they are packaged.  This License gives no
-        permission to license the work in any other way, but it does not
-        invalidate such permission if you have separately received it.
-    
-        d) If the work has interactive user interfaces, each must display
-        Appropriate Legal Notices; however, if the Program has interactive
-        interfaces that do not display Appropriate Legal Notices, your
-        work need not make them do so.
-    
-      A compilation of a covered work with other separate and independent
-    works, which are not by their nature extensions of the covered work,
-    and which are not combined with it such as to form a larger program,
-    in or on a volume of a storage or distribution medium, is called an
-    "aggregate" if the compilation and its resulting copyright are not
-    used to limit the access or legal rights of the compilation's users
-    beyond what the individual works permit.  Inclusion of a covered work
-    in an aggregate does not cause this License to apply to the other
-    parts of the aggregate.
-    
-      6. Conveying Non-Source Forms.
-    
-      You may convey a covered work in object code form under the terms
-    of sections 4 and 5, provided that you also convey the
-    machine-readable Corresponding Source under the terms of this License,
-    in one of these ways:
-    
-        a) Convey the object code in, or embodied in, a physical product
-        (including a physical distribution medium), accompanied by the
-        Corresponding Source fixed on a durable physical medium
-        customarily used for software interchange.
-    
-        b) Convey the object code in, or embodied in, a physical product
-        (including a physical distribution medium), accompanied by a
-        written offer, valid for at least three years and valid for as
-        long as you offer spare parts or customer support for that product
-        model, to give anyone who possesses the object code either (1) a
-        copy of the Corresponding Source for all the software in the
-        product that is covered by this License, on a durable physical
-        medium customarily used for software interchange, for a price no
-        more than your reasonable cost of physically performing this
-        conveying of source, or (2) access to copy the
-        Corresponding Source from a network server at no charge.
-    
-        c) Convey individual copies of the object code with a copy of the
-        written offer to provide the Corresponding Source.  This
-        alternative is allowed only occasionally and noncommercially, and
-        only if you received the object code with such an offer, in accord
-        with subsection 6b.
-    
-        d) Convey the object code by offering access from a designated
-        place (gratis or for a charge), and offer equivalent access to the
-        Corresponding Source in the same way through the same place at no
-        further charge.  You need not require recipients to copy the
-        Corresponding Source along with the object code.  If the place to
-        copy the object code is a network server, the Corresponding Source
-        may be on a different server (operated by you or a third party)
-        that supports equivalent copying facilities, provided you maintain
-        clear directions next to the object code saying where to find the
-        Corresponding Source.  Regardless of what server hosts the
-        Corresponding Source, you remain obligated to ensure that it is
-        available for as long as needed to satisfy these requirements.
-    
-        e) Convey the object code using peer-to-peer transmission, provided
-        you inform other peers where the object code and Corresponding
-        Source of the work are being offered to the general public at no
-        charge under subsection 6d.
-    
-      A separable portion of the object code, whose source code is excluded
-    from the Corresponding Source as a System Library, need not be
-    included in conveying the object code work.
-    
-      A "User Product" is either (1) a "consumer product", which means any
-    tangible personal property which is normally used for personal, family,
-    or household purposes, or (2) anything designed or sold for incorporation
-    into a dwelling.  In determining whether a product is a consumer product,
-    doubtful cases shall be resolved in favor of coverage.  For a particular
-    product received by a particular user, "normally used" refers to a
-    typical or common use of that class of product, regardless of the status
-    of the particular user or of the way in which the particular user
-    actually uses, or expects or is expected to use, the product.  A product
-    is a consumer product regardless of whether the product has substantial
-    commercial, industrial or non-consumer uses, unless such uses represent
-    the only significant mode of use of the product.
-    
-      "Installation Information" for a User Product means any methods,
-    procedures, authorization keys, or other information required to install
-    and execute modified versions of a covered work in that User Product from
-    a modified version of its Corresponding Source.  The information must
-    suffice to ensure that the continued functioning of the modified object
-    code is in no case prevented or interfered with solely because
-    modification has been made.
-    
-      If you convey an object code work under this section in, or with, or
-    specifically for use in, a User Product, and the conveying occurs as
-    part of a transaction in which the right of possession and use of the
-    User Product is transferred to the recipient in perpetuity or for a
-    fixed term (regardless of how the transaction is characterized), the
-    Corresponding Source conveyed under this section must be accompanied
-    by the Installation Information.  But this requirement does not apply
-    if neither you nor any third party retains the ability to install
-    modified object code on the User Product (for example, the work has
-    been installed in ROM).
-    
-      The requirement to provide Installation Information does not include a
-    requirement to continue to provide support service, warranty, or updates
-    for a work that has been modified or installed by the recipient, or for
-    the User Product in which it has been modified or installed.  Access to a
-    network may be denied when the modification itself materially and
-    adversely affects the operation of the network or violates the rules and
-    protocols for communication across the network.
-    
-      Corresponding Source conveyed, and Installation Information provided,
-    in accord with this section must be in a format that is publicly
-    documented (and with an implementation available to the public in
-    source code form), and must require no special password or key for
-    unpacking, reading or copying.
-    
-      7. Additional Terms.
-    
-      "Additional permissions" are terms that supplement the terms of this
-    License by making exceptions from one or more of its conditions.
-    Additional permissions that are applicable to the entire Program shall
-    be treated as though they were included in this License, to the extent
-    that they are valid under applicable law.  If additional permissions
-    apply only to part of the Program, that part may be used separately
-    under those permissions, but the entire Program remains governed by
-    this License without regard to the additional permissions.
-    
-      When you convey a copy of a covered work, you may at your option
-    remove any additional permissions from that copy, or from any part of
-    it.  (Additional permissions may be written to require their own
-    removal in certain cases when you modify the work.)  You may place
-    additional permissions on material, added by you to a covered work,
-    for which you have or can give appropriate copyright permission.
-    
-      Notwithstanding any other provision of this License, for material you
-    add to a covered work, you may (if authorized by the copyright holders of
-    that material) supplement the terms of this License with terms:
-    
-        a) Disclaiming warranty or limiting liability differently from the
-        terms of sections 15 and 16 of this License; or
-    
-        b) Requiring preservation of specified reasonable legal notices or
-        author attributions in that material or in the Appropriate Legal
-        Notices displayed by works containing it; or
-    
-        c) Prohibiting misrepresentation of the origin of that material, or
-        requiring that modified versions of such material be marked in
-        reasonable ways as different from the original version; or
-    
-        d) Limiting the use for publicity purposes of names of licensors or
-        authors of the material; or
-    
-        e) Declining to grant rights under trademark law for use of some
-        trade names, trademarks, or service marks; or
-    
-        f) Requiring indemnification of licensors and authors of that
-        material by anyone who conveys the material (or modified versions of
-        it) with contractual assumptions of liability to the recipient, for
-        any liability that these contractual assumptions directly impose on
-        those licensors and authors.
-    
-      All other non-permissive additional terms are considered "further
-    restrictions" within the meaning of section 10.  If the Program as you
-    received it, or any part of it, contains a notice stating that it is
-    governed by this License along with a term that is a further
-    restriction, you may remove that term.  If a license document contains
-    a further restriction but permits relicensing or conveying under this
-    License, you may add to a covered work material governed by the terms
-    of that license document, provided that the further restriction does
-    not survive such relicensing or conveying.
-    
-      If you add terms to a covered work in accord with this section, you
-    must place, in the relevant source files, a statement of the
-    additional terms that apply to those files, or a notice indicating
-    where to find the applicable terms.
-    
-      Additional terms, permissive or non-permissive, may be stated in the
-    form of a separately written license, or stated as exceptions;
-    the above requirements apply either way.
-    
-      8. Termination.
-    
-      You may not propagate or modify a covered work except as expressly
-    provided under this License.  Any attempt otherwise to propagate or
-    modify it is void, and will automatically terminate your rights under
-    this License (including any patent licenses granted under the third
-    paragraph of section 11).
-    
-      However, if you cease all violation of this License, then your
-    license from a particular copyright holder is reinstated (a)
-    provisionally, unless and until the copyright holder explicitly and
-    finally terminates your license, and (b) permanently, if the copyright
-    holder fails to notify you of the violation by some reasonable means
-    prior to 60 days after the cessation.
-    
-      Moreover, your license from a particular copyright holder is
-    reinstated permanently if the copyright holder notifies you of the
-    violation by some reasonable means, this is the first time you have
-    received notice of violation of this License (for any work) from that
-    copyright holder, and you cure the violation prior to 30 days after
-    your receipt of the notice.
-    
-      Termination of your rights under this section does not terminate the
-    licenses of parties who have received copies or rights from you under
-    this License.  If your rights have been terminated and not permanently
-    reinstated, you do not qualify to receive new licenses for the same
-    material under section 10.
-    
-      9. Acceptance Not Required for Having Copies.
-    
-      You are not required to accept this License in order to receive or
-    run a copy of the Program.  Ancillary propagation of a covered work
-    occurring solely as a consequence of using peer-to-peer transmission
-    to receive a copy likewise does not require acceptance.  However,
-    nothing other than this License grants you permission to propagate or
-    modify any covered work.  These actions infringe copyright if you do
-    not accept this License.  Therefore, by modifying or propagating a
-    covered work, you indicate your acceptance of this License to do so.
-    
-      10. Automatic Licensing of Downstream Recipients.
-    
-      Each time you convey a covered work, the recipient automatically
-    receives a license from the original licensors, to run, modify and
-    propagate that work, subject to this License.  You are not responsible
-    for enforcing compliance by third parties with this License.
-    
-      An "entity transaction" is a transaction transferring control of an
-    organization, or substantially all assets of one, or subdividing an
-    organization, or merging organizations.  If propagation of a covered
-    work results from an entity transaction, each party to that
-    transaction who receives a copy of the work also receives whatever
-    licenses to the work the party's predecessor in interest had or could
-    give under the previous paragraph, plus a right to possession of the
-    Corresponding Source of the work from the predecessor in interest, if
-    the predecessor has it or can get it with reasonable efforts.
-    
-      You may not impose any further restrictions on the exercise of the
-    rights granted or affirmed under this License.  For example, you may
-    not impose a license fee, royalty, or other charge for exercise of
-    rights granted under this License, and you may not initiate litigation
-    (including a cross-claim or counterclaim in a lawsuit) alleging that
-    any patent claim is infringed by making, using, selling, offering for
-    sale, or importing the Program or any portion of it.
-    
-      11. Patents.
-    
-      A "contributor" is a copyright holder who authorizes use under this
-    License of the Program or a work on which the Program is based.  The
-    work thus licensed is called the contributor's "contributor version".
-    
-      A contributor's "essential patent claims" are all patent claims
-    owned or controlled by the contributor, whether already acquired or
-    hereafter acquired, that would be infringed by some manner, permitted
-    by this License, of making, using, or selling its contributor version,
-    but do not include claims that would be infringed only as a
-    consequence of further modification of the contributor version.  For
-    purposes of this definition, "control" includes the right to grant
-    patent sublicenses in a manner consistent with the requirements of
-    this License.
-    
-      Each contributor grants you a non-exclusive, worldwide, royalty-free
-    patent license under the contributor's essential patent claims, to
-    make, use, sell, offer for sale, import and otherwise run, modify and
-    propagate the contents of its contributor version.
-    
-      In the following three paragraphs, a "patent license" is any express
-    agreement or commitment, however denominated, not to enforce a patent
-    (such as an express permission to practice a patent or covenant not to
-    sue for patent infringement).  To "grant" such a patent license to a
-    party means to make such an agreement or commitment not to enforce a
-    patent against the party.
-    
-      If you convey a covered work, knowingly relying on a patent license,
-    and the Corresponding Source of the work is not available for anyone
-    to copy, free of charge and under the terms of this License, through a
-    publicly available network server or other readily accessible means,
-    then you must either (1) cause the Corresponding Source to be so
-    available, or (2) arrange to deprive yourself of the benefit of the
-    patent license for this particular work, or (3) arrange, in a manner
-    consistent with the requirements of this License, to extend the patent
-    license to downstream recipients.  "Knowingly relying" means you have
-    actual knowledge that, but for the patent license, your conveying the
-    covered work in a country, or your recipient's use of the covered work
-    in a country, would infringe one or more identifiable patents in that
-    country that you have reason to believe are valid.
-    
-      If, pursuant to or in connection with a single transaction or
-    arrangement, you convey, or propagate by procuring conveyance of, a
-    covered work, and grant a patent license to some of the parties
-    receiving the covered work authorizing them to use, propagate, modify
-    or convey a specific copy of the covered work, then the patent license
-    you grant is automatically extended to all recipients of the covered
-    work and works based on it.
-    
-      A patent license is "discriminatory" if it does not include within
-    the scope of its coverage, prohibits the exercise of, or is
-    conditioned on the non-exercise of one or more of the rights that are
-    specifically granted under this License.  You may not convey a covered
-    work if you are a party to an arrangement with a third party that is
-    in the business of distributing software, under which you make payment
-    to the third party based on the extent of your activity of conveying
-    the work, and under which the third party grants, to any of the
-    parties who would receive the covered work from you, a discriminatory
-    patent license (a) in connection with copies of the covered work
-    conveyed by you (or copies made from those copies), or (b) primarily
-    for and in connection with specific products or compilations that
-    contain the covered work, unless you entered into that arrangement,
-    or that patent license was granted, prior to 28 March 2007.
-    
-      Nothing in this License shall be construed as excluding or limiting
-    any implied license or other defenses to infringement that may
-    otherwise be available to you under applicable patent law.
-    
-      12. No Surrender of Others' Freedom.
-    
-      If conditions are imposed on you (whether by court order, agreement or
-    otherwise) that contradict the conditions of this License, they do not
-    excuse you from the conditions of this License.  If you cannot convey a
-    covered work so as to satisfy simultaneously your obligations under this
-    License and any other pertinent obligations, then as a consequence you may
-    not convey it at all.  For example, if you agree to terms that obligate you
-    to collect a royalty for further conveying from those to whom you convey
-    the Program, the only way you could satisfy both those terms and this
-    License would be to refrain entirely from conveying the Program.
-    
-      13. Use with the GNU Affero General Public License.
-    
-      Notwithstanding any other provision of this License, you have
-    permission to link or combine any covered work with a work licensed
-    under version 3 of the GNU Affero General Public License into a single
-    combined work, and to convey the resulting work.  The terms of this
-    License will continue to apply to the part which is the covered work,
-    but the special requirements of the GNU Affero General Public License,
-    section 13, concerning interaction through a network will apply to the
-    combination as such.
-    
-      14. Revised Versions of this License.
-    
-      The Free Software Foundation may publish revised and/or new versions of
-    the GNU General Public License from time to time.  Such new versions will
-    be similar in spirit to the present version, but may differ in detail to
-    address new problems or concerns.
-    
-      Each version is given a distinguishing version number.  If the
-    Program specifies that a certain numbered version of the GNU General
-    Public License "or any later version" applies to it, you have the
-    option of following the terms and conditions either of that numbered
-    version or of any later version published by the Free Software
-    Foundation.  If the Program does not specify a version number of the
-    GNU General Public License, you may choose any version ever published
-    by the Free Software Foundation.
-    
-      If the Program specifies that a proxy can decide which future
-    versions of the GNU General Public License can be used, that proxy's
-    public statement of acceptance of a version permanently authorizes you
-    to choose that version for the Program.
-    
-      Later license versions may give you additional or different
-    permissions.  However, no additional obligations are imposed on any
-    author or copyright holder as a result of your choosing to follow a
-    later version.
-    
-      15. Disclaimer of Warranty.
-    
-      THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
-    APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
-    HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
-    OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
-    THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-    PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
-    IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
-    ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
-    
-      16. Limitation of Liability.
-    
-      IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
-    WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
-    THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
-    GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
-    USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
-    DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
-    PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
-    EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
-    SUCH DAMAGES.
-    
-      17. Interpretation of Sections 15 and 16.
-    
-      If the disclaimer of warranty and limitation of liability provided
-    above cannot be given local legal effect according to their terms,
-    reviewing courts shall apply local law that most closely approximates
-    an absolute waiver of all civil liability in connection with the
-    Program, unless a warranty or assumption of liability accompanies a
-    copy of the Program in return for a fee.
-    
-                         END OF TERMS AND CONDITIONS
-    
-                How to Apply These Terms to Your New Programs
-    
-      If you develop a new program, and you want it to be of the greatest
-    possible use to the public, the best way to achieve this is to make it
-    free software which everyone can redistribute and change under these terms.
-    
-      To do so, attach the following notices to the program.  It is safest
-    to attach them to the start of each source file to most effectively
-    state the exclusion of warranty; and each file should have at least
-    the "copyright" line and a pointer to where the full notice is found.
-    
-        <one line to give the program's name and a brief idea of what it does.>
-        Copyright (C) <year>  <name of author>
-    
-        This program is free software: you can redistribute it and/or modify
-        it under the terms of the GNU General Public License as published by
-        the Free Software Foundation, either version 3 of the License, or
-        (at your option) any later version.
-    
-        This program is distributed in the hope that it will be useful,
-        but WITHOUT ANY WARRANTY; without even the implied warranty of
-        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-        GNU General Public License for more details.
-    
-        You should have received a copy of the GNU General Public License
-        along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
-    Also add information on how to contact you by electronic and paper mail.
-    
-      If the program does terminal interaction, make it output a short
-    notice like this when it starts in an interactive mode:
-    
-        <program>  Copyright (C) <year>  <name of author>
-        This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.
-        This is free software, and you are welcome to redistribute it
-        under certain conditions; type `show c' for details.
-    
-    The hypothetical commands `show w' and `show c' should show the appropriate
-    parts of the General Public License.  Of course, your program's commands
-    might be different; for a GUI interface, you would use an "about box".
-    
-      You should also get your employer (if you work as a programmer) or school,
-    if any, to sign a "copyright disclaimer" for the program, if necessary.
-    For more information on this, and how to apply and follow the GNU GPL, see
-    <http://www.gnu.org/licenses/>.
 
-      The GNU General Public License does not permit incorporating your program
-    into proprietary programs.  If your program is a subroutine library, you
-    may consider it more useful to permit linking proprietary applications with
-    the library.  If this is what you want to do, use the GNU Lesser General
-    Public License instead of this License.  But first, please read
-    <http://www.gnu.org/philosophy/why-not-lgpl.html>.
+```text
+Copyright (C) 2026 BJJ McCormick, N Roxburgh & JG Polhill
+
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            Preamble
+
+  The GNU General Public License is a free, copyleft license for
+software and other kinds of works.
+
+  The licenses for most software and other practical works are designed
+to take away your freedom to share and change the works.  By contrast,
+the GNU General Public License is intended to guarantee your freedom to
+share and change all versions of a program--to make sure it remains free
+software for all its users.  We, the Free Software Foundation, use the
+GNU General Public License for most of our software; it applies also to
+any other work released this way by its authors.  You can apply it to
+your programs, too.
+
+  When we speak of free software, we are referring to freedom, not
+price.  Our General Public Licenses are designed to make sure that you
+have the freedom to distribute copies of free software (and charge for
+them if you wish), that you receive source code or can get it if you
+want it, that you can change the software or use pieces of it in new
+free programs, and that you know you can do these things.
+
+  To protect your rights, we need to prevent others from denying you
+these rights or asking you to surrender the rights.  Therefore, you have
+certain responsibilities if you distribute copies of the software, or if
+you modify it: responsibilities to respect the freedom of others.
+
+  For example, if you distribute copies of such a program, whether
+gratis or for a fee, you must pass on to the recipients the same
+freedoms that you received.  You must make sure that they, too, receive
+or can get the source code.  And you must show them these terms so they
+know their rights.
+
+  Developers that use the GNU GPL protect your rights with two steps:
+(1) assert copyright on the software, and (2) offer you this License
+giving you legal permission to copy, distribute and/or modify it.
+
+  For the developers' and authors' protection, the GPL clearly explains
+that there is no warranty for this free software.  For both users' and
+authors' sake, the GPL requires that modified versions be marked as
+changed, so that their problems will not be attributed erroneously to
+authors of previous versions.
+
+  Some devices are designed to deny users access to install or run
+modified versions of the software inside them, although the manufacturer
+can do so.  This is fundamentally incompatible with the aim of
+protecting users' freedom to change the software.  The systematic
+pattern of such abuse occurs in the area of products for individuals to
+use, which is precisely where it is most unacceptable.  Therefore, we
+have designed this version of the GPL to prohibit the practice for those
+products.  If such problems arise substantially in other domains, we
+stand ready to extend this provision to those domains in future versions
+of the GPL, as needed to protect the freedom of users.
+
+  Finally, every program is threatened constantly by software patents.
+States should not allow patents to restrict development and use of
+software on general-purpose computers, but in those that do, we wish to
+avoid the special danger that patents applied to a free program could
+make it effectively proprietary.  To prevent this, the GPL assures that
+patents cannot be used to render the program non-free.
+
+  The precise terms and conditions for copying, distribution and
+modification follow.
+
+                       TERMS AND CONDITIONS
+
+  0. Definitions.
+
+  "This License" refers to version 3 of the GNU General Public License.
+
+  "Copyright" also means copyright-like laws that apply to other kinds of
+works, such as semiconductor masks.
+
+  "The Program" refers to any copyrightable work licensed under this
+License.  Each licensee is addressed as "you".  "Licensees" and
+"recipients" may be individuals or organizations.
+
+  To "modify" a work means to copy from or adapt all or part of the work
+in a fashion requiring copyright permission, other than the making of an
+exact copy.  The resulting work is called a "modified version" of the
+earlier work or a work "based on" the earlier work.
+
+  A "covered work" means either the unmodified Program or a work based
+on the Program.
+
+  To "propagate" a work means to do anything with it that, without
+permission, would make you directly or secondarily liable for
+infringement under applicable copyright law, except executing it on a
+computer or modifying a private copy.  Propagation includes copying,
+distribution (with or without modification), making available to the
+public, and in some countries other activities as well.
+
+  To "convey" a work means any kind of propagation that enables other
+parties to make or receive copies.  Mere interaction with a user through
+a computer network, with no transfer of a copy, is not conveying.
+
+  An interactive user interface displays "Appropriate Legal Notices"
+to the extent that it includes a convenient and prominently visible
+feature that (1) displays an appropriate copyright notice, and (2)
+tells the user that there is no warranty for the work (except to the
+extent that warranties are provided), that licensees may convey the
+work under this License, and how to view a copy of this License.  If
+the interface presents a list of user commands or options, such as a
+menu, a prominent item in the list meets this criterion.
+
+  1. Source Code.
+
+  The "source code" for a work means the preferred form of the work
+for making modifications to it.  "Object code" means any non-source
+form of a work.
+
+  A "Standard Interface" means an interface that either is an official
+standard defined by a recognized standards body, or, in the case of
+interfaces specified for a particular programming language, one that
+is widely used among developers working in that language.
+
+  The "System Libraries" of an executable work include anything, other
+than the work as a whole, that (a) is included in the normal form of
+packaging a Major Component, but which is not part of that Major
+Component, and (b) serves only to enable use of the work with that
+Major Component, or to implement a Standard Interface for which an
+implementation is available to the public in source code form.  A
+"Major Component", in this context, means a major essential component
+(kernel, window system, and so on) of the specific operating system
+(if any) on which the executable work runs, or a compiler used to
+produce the work, or an object code interpreter used to run it.
+
+  The "Corresponding Source" for a work in object code form means all
+the source code needed to generate, install, and (for an executable
+work) run the object code and to modify the work, including scripts to
+control those activities.  However, it does not include the work's
+System Libraries, or general-purpose tools or generally available free
+programs which are used unmodified in performing those activities but
+which are not part of the work.  For example, Corresponding Source
+includes interface definition files associated with source files for
+the work, and the source code for shared libraries and dynamically
+linked subprograms that the work is specifically designed to require,
+such as by intimate data communication or control flow between those
+subprograms and other parts of the work.
+
+  The Corresponding Source need not include anything that users
+can regenerate automatically from other parts of the Corresponding
+Source.
+
+  The Corresponding Source for a work in source code form is that
+same work.
+
+  2. Basic Permissions.
+
+  All rights granted under this License are granted for the term of
+copyright on the Program, and are irrevocable provided the stated
+conditions are met.  This License explicitly affirms your unlimited
+permission to run the unmodified Program.  The output from running a
+covered work is covered by this License only if the output, given its
+content, constitutes a covered work.  This License acknowledges your
+rights of fair use or other equivalent, as provided by copyright law.
+
+  You may make, run and propagate covered works that you do not
+convey, without conditions so long as your license otherwise remains
+in force.  You may convey covered works to others for the sole purpose
+of having them make modifications exclusively for you, or provide you
+with facilities for running those works, provided that you comply with
+the terms of this License in conveying all material for which you do
+not control copyright.  Those thus making or running the covered works
+for you must do so exclusively on your behalf, under your direction
+and control, on terms that prohibit them from making any copies of
+your copyrighted material outside their relationship with you.
+
+  Conveying under any other circumstances is permitted solely under
+the conditions stated below.  Sublicensing is not allowed; section 10
+makes it unnecessary.
+
+  3. Protecting Users' Legal Rights From Anti-Circumvention Law.
+
+  No covered work shall be deemed part of an effective technological
+measure under any applicable law fulfilling obligations under article
+11 of the WIPO copyright treaty adopted on 20 December 1996, or
+similar laws prohibiting or restricting circumvention of such
+measures.
+
+  When you convey a covered work, you waive any legal power to forbid
+circumvention of technological measures to the extent such circumvention
+is effected by exercising rights under this License with respect to
+the covered work, and you disclaim any intention to limit operation or
+modification of the work as a means of enforcing, against the work's
+users, your or third parties' legal rights to forbid circumvention of
+technological measures.
+
+  4. Conveying Verbatim Copies.
+
+  You may convey verbatim copies of the Program's source code as you
+receive it, in any medium, provided that you conspicuously and
+appropriately publish on each copy an appropriate copyright notice;
+keep intact all notices stating that this License and any
+non-permissive terms added in accord with section 7 apply to the code;
+keep intact all notices of the absence of any warranty; and give all
+recipients a copy of this License along with the Program.
+
+  You may charge any price or no price for each copy that you convey,
+and you may offer support or warranty protection for a fee.
+
+  5. Conveying Modified Source Versions.
+
+  You may convey a work based on the Program, or the modifications to
+produce it from the Program, in the form of source code under the
+terms of section 4, provided that you also meet all of these conditions:
+
+    a) The work must carry prominent notices stating that you modified
+    it, and giving a relevant date.
+
+    b) The work must carry prominent notices stating that it is
+    released under this License and any conditions added under section
+    7.  This requirement modifies the requirement in section 4 to
+    "keep intact all notices".
+
+    c) You must license the entire work, as a whole, under this
+    License to anyone who comes into possession of a copy.  This
+    License will therefore apply, along with any applicable section 7
+    additional terms, to the whole of the work, and all its parts,
+    regardless of how they are packaged.  This License gives no
+    permission to license the work in any other way, but it does not
+    invalidate such permission if you have separately received it.
+
+    d) If the work has interactive user interfaces, each must display
+    Appropriate Legal Notices; however, if the Program has interactive
+    interfaces that do not display Appropriate Legal Notices, your
+    work need not make them do so.
+
+  A compilation of a covered work with other separate and independent
+works, which are not by their nature extensions of the covered work,
+and which are not combined with it such as to form a larger program,
+in or on a volume of a storage or distribution medium, is called an
+"aggregate" if the compilation and its resulting copyright are not
+used to limit the access or legal rights of the compilation's users
+beyond what the individual works permit.  Inclusion of a covered work
+in an aggregate does not cause this License to apply to the other
+parts of the aggregate.
+
+  6. Conveying Non-Source Forms.
+
+  You may convey a covered work in object code form under the terms
+of sections 4 and 5, provided that you also convey the
+machine-readable Corresponding Source under the terms of this License,
+in one of these ways:
+
+    a) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by the
+    Corresponding Source fixed on a durable physical medium
+    customarily used for software interchange.
+
+    b) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by a
+    written offer, valid for at least three years and valid for as
+    long as you offer spare parts or customer support for that product
+    model, to give anyone who possesses the object code either (1) a
+    copy of the Corresponding Source for all the software in the
+    product that is covered by this License, on a durable physical
+    medium customarily used for software interchange, for a price no
+    more than your reasonable cost of physically performing this
+    conveying of source, or (2) access to copy the
+    Corresponding Source from a network server at no charge.
+
+    c) Convey individual copies of the object code with a copy of the
+    written offer to provide the Corresponding Source.  This
+    alternative is allowed only occasionally and noncommercially, and
+    only if you received the object code with such an offer, in accord
+    with subsection 6b.
+
+    d) Convey the object code by offering access from a designated
+    place (gratis or for a charge), and offer equivalent access to the
+    Corresponding Source in the same way through the same place at no
+    further charge.  You need not require recipients to copy the
+    Corresponding Source along with the object code.  If the place to
+    copy the object code is a network server, the Corresponding Source
+    may be on a different server (operated by you or a third party)
+    that supports equivalent copying facilities, provided you maintain
+    clear directions next to the object code saying where to find the
+    Corresponding Source.  Regardless of what server hosts the
+    Corresponding Source, you remain obligated to ensure that it is
+    available for as long as needed to satisfy these requirements.
+
+    e) Convey the object code using peer-to-peer transmission, provided
+    you inform other peers where the object code and Corresponding
+    Source of the work are being offered to the general public at no
+    charge under subsection 6d.
+
+  A separable portion of the object code, whose source code is excluded
+from the Corresponding Source as a System Library, need not be
+included in conveying the object code work.
+
+  A "User Product" is either (1) a "consumer product", which means any
+tangible personal property which is normally used for personal, family,
+or household purposes, or (2) anything designed or sold for incorporation
+into a dwelling.  In determining whether a product is a consumer product,
+doubtful cases shall be resolved in favor of coverage.  For a particular
+product received by a particular user, "normally used" refers to a
+typical or common use of that class of product, regardless of the status
+of the particular user or of the way in which the particular user
+actually uses, or expects or is expected to use, the product.  A product
+is a consumer product regardless of whether the product has substantial
+commercial, industrial or non-consumer uses, unless such uses represent
+the only significant mode of use of the product.
+
+  "Installation Information" for a User Product means any methods,
+procedures, authorization keys, or other information required to install
+and execute modified versions of a covered work in that User Product from
+a modified version of its Corresponding Source.  The information must
+suffice to ensure that the continued functioning of the modified object
+code is in no case prevented or interfered with solely because
+modification has been made.
+
+  If you convey an object code work under this section in, or with, or
+specifically for use in, a User Product, and the conveying occurs as
+part of a transaction in which the right of possession and use of the
+User Product is transferred to the recipient in perpetuity or for a
+fixed term (regardless of how the transaction is characterized), the
+Corresponding Source conveyed under this section must be accompanied
+by the Installation Information.  But this requirement does not apply
+if neither you nor any third party retains the ability to install
+modified object code on the User Product (for example, the work has
+been installed in ROM).
+
+  The requirement to provide Installation Information does not include a
+requirement to continue to provide support service, warranty, or updates
+for a work that has been modified or installed by the recipient, or for
+the User Product in which it has been modified or installed.  Access to a
+network may be denied when the modification itself materially and
+adversely affects the operation of the network or violates the rules and
+protocols for communication across the network.
+
+  Corresponding Source conveyed, and Installation Information provided,
+in accord with this section must be in a format that is publicly
+documented (and with an implementation available to the public in
+source code form), and must require no special password or key for
+unpacking, reading or copying.
+
+  7. Additional Terms.
+
+  "Additional permissions" are terms that supplement the terms of this
+License by making exceptions from one or more of its conditions.
+Additional permissions that are applicable to the entire Program shall
+be treated as though they were included in this License, to the extent
+that they are valid under applicable law.  If additional permissions
+apply only to part of the Program, that part may be used separately
+under those permissions, but the entire Program remains governed by
+this License without regard to the additional permissions.
+
+  When you convey a copy of a covered work, you may at your option
+remove any additional permissions from that copy, or from any part of
+it.  (Additional permissions may be written to require their own
+removal in certain cases when you modify the work.)  You may place
+additional permissions on material, added by you to a covered work,
+for which you have or can give appropriate copyright permission.
+
+  Notwithstanding any other provision of this License, for material you
+add to a covered work, you may (if authorized by the copyright holders of
+that material) supplement the terms of this License with terms:
+
+    a) Disclaiming warranty or limiting liability differently from the
+    terms of sections 15 and 16 of this License; or
+
+    b) Requiring preservation of specified reasonable legal notices or
+    author attributions in that material or in the Appropriate Legal
+    Notices displayed by works containing it; or
+
+    c) Prohibiting misrepresentation of the origin of that material, or
+    requiring that modified versions of such material be marked in
+    reasonable ways as different from the original version; or
+
+    d) Limiting the use for publicity purposes of names of licensors or
+    authors of the material; or
+
+    e) Declining to grant rights under trademark law for use of some
+    trade names, trademarks, or service marks; or
+
+    f) Requiring indemnification of licensors and authors of that
+    material by anyone who conveys the material (or modified versions of
+    it) with contractual assumptions of liability to the recipient, for
+    any liability that these contractual assumptions directly impose on
+    those licensors and authors.
+
+  All other non-permissive additional terms are considered "further
+restrictions" within the meaning of section 10.  If the Program as you
+received it, or any part of it, contains a notice stating that it is
+governed by this License along with a term that is a further
+restriction, you may remove that term.  If a license document contains
+a further restriction but permits relicensing or conveying under this
+License, you may add to a covered work material governed by the terms
+of that license document, provided that the further restriction does
+not survive such relicensing or conveying.
+
+  If you add terms to a covered work in accord with this section, you
+must place, in the relevant source files, a statement of the
+additional terms that apply to those files, or a notice indicating
+where to find the applicable terms.
+
+  Additional terms, permissive or non-permissive, may be stated in the
+form of a separately written license, or stated as exceptions;
+the above requirements apply either way.
+
+  8. Termination.
+
+  You may not propagate or modify a covered work except as expressly
+provided under this License.  Any attempt otherwise to propagate or
+modify it is void, and will automatically terminate your rights under
+this License (including any patent licenses granted under the third
+paragraph of section 11).
+
+  However, if you cease all violation of this License, then your
+license from a particular copyright holder is reinstated (a)
+provisionally, unless and until the copyright holder explicitly and
+finally terminates your license, and (b) permanently, if the copyright
+holder fails to notify you of the violation by some reasonable means
+prior to 60 days after the cessation.
+
+  Moreover, your license from a particular copyright holder is
+reinstated permanently if the copyright holder notifies you of the
+violation by some reasonable means, this is the first time you have
+received notice of violation of this License (for any work) from that
+copyright holder, and you cure the violation prior to 30 days after
+your receipt of the notice.
+
+  Termination of your rights under this section does not terminate the
+licenses of parties who have received copies or rights from you under
+this License.  If your rights have been terminated and not permanently
+reinstated, you do not qualify to receive new licenses for the same
+material under section 10.
+
+  9. Acceptance Not Required for Having Copies.
+
+  You are not required to accept this License in order to receive or
+run a copy of the Program.  Ancillary propagation of a covered work
+occurring solely as a consequence of using peer-to-peer transmission
+to receive a copy likewise does not require acceptance.  However,
+nothing other than this License grants you permission to propagate or
+modify any covered work.  These actions infringe copyright if you do
+not accept this License.  Therefore, by modifying or propagating a
+covered work, you indicate your acceptance of this License to do so.
+
+  10. Automatic Licensing of Downstream Recipients.
+
+  Each time you convey a covered work, the recipient automatically
+receives a license from the original licensors, to run, modify and
+propagate that work, subject to this License.  You are not responsible
+for enforcing compliance by third parties with this License.
+
+  An "entity transaction" is a transaction transferring control of an
+organization, or substantially all assets of one, or subdividing an
+organization, or merging organizations.  If propagation of a covered
+work results from an entity transaction, each party to that
+transaction who receives a copy of the work also receives whatever
+licenses to the work the party's predecessor in interest had or could
+give under the previous paragraph, plus a right to possession of the
+Corresponding Source of the work from the predecessor in interest, if
+the predecessor has it or can get it with reasonable efforts.
+
+  You may not impose any further restrictions on the exercise of the
+rights granted or affirmed under this License.  For example, you may
+not impose a license fee, royalty, or other charge for exercise of
+rights granted under this License, and you may not initiate litigation
+(including a cross-claim or counterclaim in a lawsuit) alleging that
+any patent claim is infringed by making, using, selling, offering for
+sale, or importing the Program or any portion of it.
+
+  11. Patents.
+
+  A "contributor" is a copyright holder who authorizes use under this
+License of the Program or a work on which the Program is based.  The
+work thus licensed is called the contributor's "contributor version".
+
+  A contributor's "essential patent claims" are all patent claims
+owned or controlled by the contributor, whether already acquired or
+hereafter acquired, that would be infringed by some manner, permitted
+by this License, of making, using, or selling its contributor version,
+but do not include claims that would be infringed only as a
+consequence of further modification of the contributor version.  For
+purposes of this definition, "control" includes the right to grant
+patent sublicenses in a manner consistent with the requirements of
+this License.
+
+  Each contributor grants you a non-exclusive, worldwide, royalty-free
+patent license under the contributor's essential patent claims, to
+make, use, sell, offer for sale, import and otherwise run, modify and
+propagate the contents of its contributor version.
+
+  In the following three paragraphs, a "patent license" is any express
+agreement or commitment, however denominated, not to enforce a patent
+(such as an express permission to practice a patent or covenant not to
+sue for patent infringement).  To "grant" such a patent license to a
+party means to make such an agreement or commitment not to enforce a
+patent against the party.
+
+  If you convey a covered work, knowingly relying on a patent license,
+and the Corresponding Source of the work is not available for anyone
+to copy, free of charge and under the terms of this License, through a
+publicly available network server or other readily accessible means,
+then you must either (1) cause the Corresponding Source to be so
+available, or (2) arrange to deprive yourself of the benefit of the
+patent license for this particular work, or (3) arrange, in a manner
+consistent with the requirements of this License, to extend the patent
+license to downstream recipients.  "Knowingly relying" means you have
+actual knowledge that, but for the patent license, your conveying the
+covered work in a country, or your recipient's use of the covered work
+in a country, would infringe one or more identifiable patents in that
+country that you have reason to believe are valid.
+
+  If, pursuant to or in connection with a single transaction or
+arrangement, you convey, or propagate by procuring conveyance of, a
+covered work, and grant a patent license to some of the parties
+receiving the covered work authorizing them to use, propagate, modify
+or convey a specific copy of the covered work, then the patent license
+you grant is automatically extended to all recipients of the covered
+work and works based on it.
+
+  A patent license is "discriminatory" if it does not include within
+the scope of its coverage, prohibits the exercise of, or is
+conditioned on the non-exercise of one or more of the rights that are
+specifically granted under this License.  You may not convey a covered
+work if you are a party to an arrangement with a third party that is
+in the business of distributing software, under which you make payment
+to the third party based on the extent of your activity of conveying
+the work, and under which the third party grants, to any of the
+parties who would receive the covered work from you, a discriminatory
+patent license (a) in connection with copies of the covered work
+conveyed by you (or copies made from those copies), or (b) primarily
+for and in connection with specific products or compilations that
+contain the covered work, unless you entered into that arrangement,
+or that patent license was granted, prior to 28 March 2007.
+
+  Nothing in this License shall be construed as excluding or limiting
+any implied license or other defenses to infringement that may
+otherwise be available to you under applicable patent law.
+
+  12. No Surrender of Others' Freedom.
+
+  If conditions are imposed on you (whether by court order, agreement or
+otherwise) that contradict the conditions of this License, they do not
+excuse you from the conditions of this License.  If you cannot convey a
+covered work so as to satisfy simultaneously your obligations under this
+License and any other pertinent obligations, then as a consequence you may
+not convey it at all.  For example, if you agree to terms that obligate you
+to collect a royalty for further conveying from those to whom you convey
+the Program, the only way you could satisfy both those terms and this
+License would be to refrain entirely from conveying the Program.
+
+  13. Use with the GNU Affero General Public License.
+
+  Notwithstanding any other provision of this License, you have
+permission to link or combine any covered work with a work licensed
+under version 3 of the GNU Affero General Public License into a single
+combined work, and to convey the resulting work.  The terms of this
+License will continue to apply to the part which is the covered work,
+but the special requirements of the GNU Affero General Public License,
+section 13, concerning interaction through a network will apply to the
+combination as such.
+
+  14. Revised Versions of this License.
+
+  The Free Software Foundation may publish revised and/or new versions of
+the GNU General Public License from time to time.  Such new versions will
+be similar in spirit to the present version, but may differ in detail to
+address new problems or concerns.
+
+  Each version is given a distinguishing version number.  If the
+Program specifies that a certain numbered version of the GNU General
+Public License "or any later version" applies to it, you have the
+option of following the terms and conditions either of that numbered
+version or of any later version published by the Free Software
+Foundation.  If the Program does not specify a version number of the
+GNU General Public License, you may choose any version ever published
+by the Free Software Foundation.
+
+  If the Program specifies that a proxy can decide which future
+versions of the GNU General Public License can be used, that proxy's
+public statement of acceptance of a version permanently authorizes you
+to choose that version for the Program.
+
+  Later license versions may give you additional or different
+permissions.  However, no additional obligations are imposed on any
+author or copyright holder as a result of your choosing to follow a
+later version.
+
+  15. Disclaimer of Warranty.
+
+  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
+APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
+HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
+OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
+IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
+ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+
+  16. Limitation of Liability.
+
+  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
+GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
+USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
+DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
+PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
+EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+
+  17. Interpretation of Sections 15 and 16.
+
+  If the disclaimer of warranty and limitation of liability provided
+above cannot be given local legal effect according to their terms,
+reviewing courts shall apply local law that most closely approximates
+an absolute waiver of all civil liability in connection with the
+Program, unless a warranty or assumption of liability accompanies a
+copy of the Program in return for a fee.
+
+                     END OF TERMS AND CONDITIONS
+
+            How to Apply These Terms to Your New Programs
+
+  If you develop a new program, and you want it to be of the greatest
+possible use to the public, the best way to achieve this is to make it
+free software which everyone can redistribute and change under these terms.
+
+  To do so, attach the following notices to the program.  It is safest
+to attach them to the start of each source file to most effectively
+state the exclusion of warranty; and each file should have at least
+the "copyright" line and a pointer to where the full notice is found.
+
+    <one line to give the program's name and a brief idea of what it does.>
+    Copyright (C) <year>  <name of author>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+Also add information on how to contact you by electronic and paper mail.
+
+  If the program does terminal interaction, make it output a short
+notice like this when it starts in an interactive mode:
+
+    <program>  Copyright (C) <year>  <name of author>
+    This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.
+    This is free software, and you are welcome to redistribute it
+    under certain conditions; type `show c' for details.
+
+The hypothetical commands `show w' and `show c' should show the appropriate
+parts of the General Public License.  Of course, your program's commands
+might be different; for a GUI interface, you would use an "about box".
+
+  You should also get your employer (if you work as a programmer) or school,
+if any, to sign a "copyright disclaimer" for the program, if necessary.
+For more information on this, and how to apply and follow the GNU GPL, see
+<https://www.gnu.org/licenses/>.
+
+  The GNU General Public License does not permit incorporating your program
+into proprietary programs.  If your program is a subroutine library, you
+may consider it more useful to permit linking proprietary applications with
+the library.  If this is what you want to do, use the GNU Lesser General
+Public License instead of this License.  But first, please read
+<https://www.gnu.org/licenses/why-not-lgpl.html>.
 
 ```
 
@@ -2911,6 +2970,9 @@ character_list = character , { character };
 
 
 ## ChangeLog
+2026-09-14 Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+  * tidied code for release to MethodsX
+
 2025-05-06 Ben McCormick <benjamin.mccormick@abdn.ac.uk>
   * tidied GUI and removed old code
 
@@ -3491,7 +3553,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.3.0
+NetLogo 6.4.0
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
@@ -3499,22 +3561,41 @@ NetLogo 6.3.0
   <experiment name="system2" repetitions="100" runMetricsEveryStep="true">
     <setup>setup</setup>
     <go>go</go>
-    <timeLimit steps="50"/>
-    <metric>output-save</metric>
+    <timeLimit steps="120"/>
+    <metric>table:get things-ordered "A"</metric>
+    <metric>table:get things-ordered "B"</metric>
+    <metric>table:get things-ordered "C"</metric>
+    <metric>table:get things-ordered "D"</metric>
+    <metric>table:get things-ordered "E"</metric>
+    <metric>table:get things-ordered "F"</metric>
+    <metric>table:get things-made "A"</metric>
+    <metric>table:get things-made "B"</metric>
+    <metric>table:get things-made "C"</metric>
+    <metric>table:get things-made "D"</metric>
+    <metric>table:get things-made "E"</metric>
+    <metric>table:get things-made "F"</metric>
+    <metric>table:get things-delivered "A"</metric>
+    <metric>table:get things-delivered "B"</metric>
+    <metric>table:get things-delivered "C"</metric>
+    <metric>table:get things-delivered "D"</metric>
+    <metric>table:get things-delivered "E"</metric>
+    <metric>table:get things-delivered "F"</metric>
+    <metric>table:get things-imported "A"</metric>
+    <metric>table:get things-imported "B"</metric>
+    <metric>table:get things-imported "C"</metric>
+    <metric>table:get things-imported "D"</metric>
+    <metric>table:get things-imported "E"</metric>
+    <metric>table:get things-imported "F"</metric>
+    <metric>table:get things-consumed "A"</metric>
+    <metric>table:get things-consumed "B"</metric>
+    <metric>table:get things-consumed "C"</metric>
+    <metric>table:get things-consumed "D"</metric>
+    <metric>table:get things-consumed "E"</metric>
+    <metric>table:get things-consumed "F"</metric>
+    <metric>table:get things-run "Process1"</metric>
+    <metric>table:get things-run "Process2"</metric>
     <enumeratedValueSet variable="init-file">
       <value value="&quot;system2/inits.txt&quot;"/>
-    </enumeratedValueSet>
-    <enumeratedValueSet variable="input-file?">
-      <value value="true"/>
-    </enumeratedValueSet>
-  </experiment>
-  <experiment name="system1" repetitions="100" runMetricsEveryStep="true">
-    <setup>setup</setup>
-    <go>go</go>
-    <timeLimit steps="50"/>
-    <metric>output-save</metric>
-    <enumeratedValueSet variable="init-file">
-      <value value="&quot;system1/inits.txt&quot;"/>
     </enumeratedValueSet>
     <enumeratedValueSet variable="input-file?">
       <value value="true"/>
@@ -3523,10 +3604,78 @@ NetLogo 6.3.0
   <experiment name="system3" repetitions="100" runMetricsEveryStep="true">
     <setup>setup</setup>
     <go>go</go>
-    <timeLimit steps="50"/>
-    <metric>output-save</metric>
+    <timeLimit steps="120"/>
+    <metric>table:get things-ordered "milk.l"</metric>
+    <metric>table:get things-ordered "beef.meat.kg"</metric>
+    <metric>table:get things-ordered "sheep.meat.kg"</metric>
+    <metric>table:get things-ordered "chicken.egg"</metric>
+    <metric>table:get things-ordered "wheat.grain.t"</metric>
+    <metric>table:get things-ordered "beef.calf"</metric>
+    <metric>table:get things-ordered "sheep.lamb"</metric>
+    <metric>table:get things-made "milk.l"</metric>
+    <metric>table:get things-made "beef.meat.kg"</metric>
+    <metric>table:get things-made "sheep.meat.kg"</metric>
+    <metric>table:get things-made "chicken.egg"</metric>
+    <metric>table:get things-made "wheat.grain.t"</metric>
+    <metric>table:get things-made "beef.calf"</metric>
+    <metric>table:get things-made "sheep.lamb"</metric>
+    <metric>table:get things-imported "milk.l"</metric>
+    <metric>table:get things-imported "beef.meat.kg"</metric>
+    <metric>table:get things-imported "sheep.meat.kg"</metric>
+    <metric>table:get things-imported "chicken.egg"</metric>
+    <metric>table:get things-imported "wheat.grain.t"</metric>
+    <metric>table:get things-imported "beef.calf"</metric>
+    <metric>table:get things-imported "sheep.lamb"</metric>
+    <metric>table:get things-delivered "milk.l"</metric>
+    <metric>table:get things-delivered "beef.meat.kg"</metric>
+    <metric>table:get things-delivered "sheep.meat.kg"</metric>
+    <metric>table:get things-delivered "chicken.egg"</metric>
+    <metric>table:get things-delivered "wheat.grain.t"</metric>
+    <metric>table:get things-delivered "beef.calf"</metric>
+    <metric>table:get things-delivered "sheep.lamb"</metric>
+    <metric>table:get things-consumed "milk.l"</metric>
+    <metric>table:get things-consumed "beef.meat.kg"</metric>
+    <metric>table:get things-consumed "sheep.meat.kg"</metric>
+    <metric>table:get things-consumed "chicken.egg"</metric>
+    <metric>table:get things-consumed "wheat.grain.t"</metric>
+    <metric>table:get things-consumed "beef.calf"</metric>
+    <metric>table:get things-consumed "sheep.lamb"</metric>
+    <metric>table:get things-run "eq.dairy"</metric>
+    <metric>table:get things-run "eq.beef"</metric>
+    <metric>table:get things-run "eq.sheep"</metric>
+    <metric>table:get things-run "eq.chicken.eggs"</metric>
+    <metric>table:get things-run "eq.beef.processing"</metric>
+    <metric>table:get things-run "eq.sheep.processing"</metric>
+    <metric>table:get things-run "eq.wheat"</metric>
     <enumeratedValueSet variable="init-file">
       <value value="&quot;system3/inits.txt&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="input-file?">
+      <value value="true"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="system1" repetitions="100" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="120"/>
+    <metric>table:get things-ordered "A"</metric>
+    <metric>table:get things-ordered "B"</metric>
+    <metric>table:get things-ordered "C"</metric>
+    <metric>table:get things-made "A"</metric>
+    <metric>table:get things-made "B"</metric>
+    <metric>table:get things-made "C"</metric>
+    <metric>table:get things-delivered "A"</metric>
+    <metric>table:get things-delivered "B"</metric>
+    <metric>table:get things-delivered "C"</metric>
+    <metric>table:get things-imported "A"</metric>
+    <metric>table:get things-imported "B"</metric>
+    <metric>table:get things-imported "C"</metric>
+    <metric>table:get things-consumed "A"</metric>
+    <metric>table:get things-consumed "B"</metric>
+    <metric>table:get things-consumed "C"</metric>
+    <metric>table:get things-run "Process1"</metric>
+    <enumeratedValueSet variable="init-file">
+      <value value="&quot;system1/inits.txt&quot;"/>
     </enumeratedValueSet>
     <enumeratedValueSet variable="input-file?">
       <value value="true"/>

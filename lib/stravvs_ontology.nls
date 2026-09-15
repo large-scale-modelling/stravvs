@@ -1,10 +1,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
+;
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v0.1, 14th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ; STRAVVS Ontology
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+
+;; REGIONS ---------------------------------------------------------------------
 ; Regions are geographies that contain state data to be used with constraints
 breed [regions region]
 
@@ -13,6 +21,7 @@ regions-own [
   regional-state ; table of state variables at regional level
 ]
 
+;; PROCESSORS ------------------------------------------------------------------
 ; Processors are agents that maintain a list of orders to make products needed
 ; by consumers and other Processors
 breed [processors processor]
@@ -42,8 +51,16 @@ processors-own [
   long-dormant ; long-term counter of dormancy
   changed ;counter for number of changes
   closed ;binary indicator if active or not
+  ;;
+  p-imitate ; probability of immitating neighbours
+  neighbourhood ; neighbours to immidate (not necessarily physical)
+  aspiration ; description of satisfaction with current processes
+  satisfice-strategy ; strategy if satisfied
+  imitative-strategy ; stratefy if immitating
+  experiment-strategy ; strategy if experimenting with something new
 ]
 
+;; PROCESSES -------------------------------------------------------------------
 ; Processes are represented as agents, but in fact are merely containers for
 ; 'equations' (in a chemical sense) that show what outputs are possible given
 ; which inputs. Processes are implemented by Processors.
@@ -55,6 +72,7 @@ processes-own [
   price ;Cost of inputs + cataysts needed to run
 ]
 
+;; META PROCESSES -------------------------------------------------------------
 ; Meta-processes are represented as agents, but in fact are merely containers for
 ; 'equations' (in a chemical sense) that modify other equations (processes.
 breed [metaprocesses metaprocess]
@@ -67,6 +85,7 @@ metaprocesses-own [
   effects ;table of products effected by meta-process
 ]
 
+;; PRODUCTS ------------------------------------------------------------------
 ; Products are physical instances of product types (strings) located in space
 ; with an amount. They are imported by importers, consumed by consumers, and
 ; converted into other products by processors.
@@ -79,8 +98,10 @@ products-own [
   ;role ; String - describes the function of the product for the current owner
 ]
 
+;; CONSUMERS ----------------------------------------------------------------
 ; Consumers consume products
 breed [consumers consumer]
+
 consumers-own [
   name ; an identifier for the processor (must be unique, but can be empty)
   location; a regional name if appropriate (region file)
@@ -91,8 +112,10 @@ consumers-own [
   friends; list of previous suppliers
 ]
 
+;; IMPORTERS ------------------------------------------------------------------
 ; Importers import products
 breed [importers importer]
+
 importers-own [
   name ; an identifier for the processor (must be unique, but can be empty)
   location; a regional name if appropriate (region file)
@@ -100,8 +123,10 @@ importers-own [
   volume ; table of product-type to amount
 ]
 
+;; LOCAL IMPORTERS ----------------------------------------------------------
 ; Local-importers import products
 breed [local-importers local-importer]
+
 local-importers-own [
   name ; an identifier for the processor (must be unique, but can be empty)
   location; a regional name if appropriate (region file)
@@ -110,9 +135,11 @@ local-importers-own [
   capacity ; capacity = size of patch
 ]
 
+;; LIMITS ------------------------------------------------------------------
 ; 'Limits' are local, regional or global conditions necessary for Processes
 ; to run
 breed [limits limit]
+
 limits-own [
   level ; "global", "regional", "local" or "patch" (patch not recommended, but is provided)
   state-variable ; name of a *-state variable to look up and check the value of
@@ -120,10 +147,11 @@ limits-own [
   value ; comparison value (list for "in" or "!in" operators)
 ]
 
-
+;; YIELDS ------------------------------------------------------------------
 ; 'yields' are local, regional or global conditions that modify process outputs
 ; to run
 breed [yields yield]
+
 yields-own [
   yield-name ;equation name
   level ; "global", "regional", "local" or "patch" (patch not recommended, but is provided)
@@ -134,6 +162,7 @@ yields-own [
   dist-param; distribution parameters
 ]
 
+;; TRANSPORTERS ------------------------------------------------------------
 ; Transporters shift produce around the space
 breed [transporters transporter]
 
@@ -147,6 +176,7 @@ transporters-own [
   in-transit?
 ]
 
+;; REGULATORS ---------------------------------------------------------------
 ; Regulators regulate product trade
 ; in the first instance they pay a subsidy for all producers running
 ; specified equations
@@ -158,6 +188,7 @@ regulators-own [
   penalised ; table of product names and subsidy value
 ]
 
+;; PATCHES -----------------------------------------------------------------
 ; Patches are the physical spaces and can have state variables that influence
 ; processes and the transport between other agents
 patches-own [
@@ -168,6 +199,18 @@ patches-own [
   trade-here?
 ]
 
+;; STRATEGIES --------------------------------------------------------------
+; Strategies are the decision-making choice used by processes and determine
+; how a process is selected (taken from RBB)
+breed [ strategies strategy ]
+strategies-own [
+  name
+  is-imitative?
+  is-historical? ; if true, cannot be used in initializing
+  algorithm
+]
+
+;; LINKS ------------------------------------------------------------------
 ; catalysts link catalysts to processes
 directed-link-breed [catalysts catalyst]
 

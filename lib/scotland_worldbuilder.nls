@@ -1,11 +1,17 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;        1         2         3         4         5         6          7         8
-;23456789012345678901234567890123456789012345678901234567890123445678901234567890
+;
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v0.1, 14th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ; Social Sciences Simulation World Builder
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; build-map()
+; {} build-map
 ; (1) either load mapping data via a shapefile or define a physical space for the
 ; agents to occupy
 ; (2) generate all agents from input files: importers, consumers, processors, 
@@ -29,12 +35,26 @@ to build-map
 
     draw-polygon
     
-    ; make table of regions
-    create-regions length (gis:feature-list-of region-map) [
-      set regional-state table:make
-      set name "everywhere"
-      set hidden? TRUE
-    ]
+    ; get all the features of the shapefile
+    let features gis:feature-list-of region-map
+    ;print (sentence "BUILD-MAP: features: " length features)
+ 
+    ; get the attribute names of the first feature
+    let attr-names gis:property-names region-map   
+    ;print (sentence "BUILD-MAP: attributes: " attr-names)
+ 
+    foreach features [ f ->
+      create-regions 1 [
+        set name gis:property-value f "name"
+        ;; get all properties for this feature
+        set regional-state table:make
+        foreach attr-names [ x ->
+          table:put regional-state (lower-case-string x) (gis:property-value f x)
+          ;print (sentence "BUILD-MAP: feature: " f " = " regional-state)
+          set hidden? TRUE
+        ]        
+      ]
+  ]
   ] [
     create-regions 1 [
       set regional-state table:make
@@ -86,8 +106,11 @@ to build-map
   ]
 end
 
+; {} draw-polyogon
 ; Draw the multi-polygon countries dataset to the drawing layer
 to draw-polygon
   gis:set-drawing-color (green + 3)
   gis:fill region-map 1
+  gis:set-drawing-color (green + 2)
+  gis:draw region-map 0.5
 end

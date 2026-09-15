@@ -1,0 +1,326 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Simulation Theory for Resources Across Venture Valuechain Systems (STRAVVS)
+; STRAVVS v0.1, 14th September, 2026
+; Ben McCormick <benjamin.mccormick@abdn.ac.uk>
+; Gary Polhill <gary.polhill@hutton.ac.uk>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Reusable Building Block decision making
+; based on RBB by Gary Polhill
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; (1)
+;; decision-maker has aspiration to meet, a probabilty of immitation and then 
+;; strategries for satisfaction and experimentation
+;; (2)
+;;  
+;; (3)
+;; Return the closest match
+;; lm -> neighbourhood
+
+; {} allocate-uses
+; pick which algorithm to use, whether habit, copying, or novel
+to-report allocate-uses
+  
+  let happiness table:get (sense-world self) "budget"
+  let outcome ""
+  ifelse happiness < aspiration [
+    ifelse random-float 1 <= p-imitate [ ;; randomly pick between imitating or randomly picking
+      ask self [  set outcome (runresult imitative-strategy) ]
+    ] [
+      set outcome [name] of one-of processes
+      ask self [  set outcome (runresult experiment-strategy) ]
+    ]
+  ] [ ; else pick strategy based on satisfaction
+    ask self [  set outcome (runresult satisfice-strategy) ]
+  ]
+  
+  report outcome
+end
+
+; {} habit-algorithm
+; continue selecting from current choices
+to-report habit-algorithm 
+  ; get the names of one of the processes already linked
+  report [ name ] of one-of implement-neighbors 
+end
+
+; {} random-algorithm
+; pick at random
+to-report random-algorithm
+  report [name] of one-of processes
+end
+
+; {} weighted-copy-algorithm
+; pick from weighted list
+to-report weighted-copy-algorithm
+  let lu-table table:make
+  
+  ; ask all proceses to populate empty table
+  ask processes [
+    table:put lu-table name 0 ; frequency of each
+  ]
+  
+  let my-neighborhood  make-neighborhood
+  
+  ifelse my-neighborhood != nobody [    
+    ;print (sentence "weight neighbors are: " [who] of my-neighborhood)
+    ; ask each neighbour what they do, and add to the table
+    ask my-neighborhood [
+      ;print (sentence "each neighbor: " self)
+      ;print (sentence "how many implementors: " count implement-neighbors)
+      ask implement-neighbors [
+        ;print (sentence "implementor: " self)
+        table:put lu-table name (1 + table:get lu-table name)
+      ]
+    ]
+  ]  [
+    ; ask someone random
+    ask one-of processes [
+      ;print (sentence "random name: " name)
+      table:put lu-table name (1 + table:get lu-table name)
+    ]
+  ]
+  
+  report (weighted-choice-table lu-table)
+end
+
+; {} weighted-choice-table
+; pick from weighted table
+to-report weighted-choice-table [ a-table ]
+  let options []
+  let weights []
+  
+  foreach table:keys a-table [ key ->
+    set options lput key options
+    set weights lput (table:get a-table key) weights
+  ]
+  
+  report weighted-choice-lists options weights
+end
+
+; {} weighted-choice-list
+; pick from weighted list
+to-report weighted-choice-lists [ options weights ]
+  let neg-wgt? reduce [ [ so-far next ] -> so-far or next < 0 ] fput false weights
+  if neg-wgt? [
+    error "Attempt to make weighted choice with negative weight"
+  ]
+  let cumulative-sum but-first reduce [
+    [ so-far next ] -> lput (next + last so-far) so-far
+  ] fput [0] weights
+  
+  let choice random-float last cumulative-sum
+  
+  let ix reduce [
+    ; we want the first ix such that choice <= cumulative-sum_ix
+    [ i j ] -> ifelse-value choice <= (item i cumulative-sum) [ i ] [ j ]
+  ] range (length weights)
+  
+  report item ix options
+end
+
+; {} jaccard-2-algorithn
+; pick from weighted list based on dissimilarity
+to-report jaccard-2-algorithm [ store-cupboard ] 
+  let me self
+  ; list of things that I own
+  let A store-cupboard ;;([stock-summary] of me)
+  
+  let jac []
+  ; ask all processes what they require
+  ask processes [          
+    let B map [x -> item 0 x] [get-inputs] of self
+    let C map [x -> item 0 x] [get-catalysts] of self
+    ; calculate the Jaccard distance
+    let J jaccard-distance A (sentence B C)
+    set jac lput (list name J) jac
+    
+  ]
+  ; sorted list of [who distance]
+  set jac sort-by [ [i ii] -> item 1 i < item 1 ii ] jac
+  
+  ; minimum distance
+  let min-dist min map [pair -> item 1 pair] jac  
+  ; list of who-IDs for processors matching the minimum
+  let closest-ids map [pair -> item 0 pair] filter [pair -> item 1 pair = min-dist] jac
+  
+  report closest-ids
+end
+
+; {} jaccard-algorithn
+; pick from weighted list based on dissimilarity
+to-report jaccard-algorithm
+  let me self
+  ; list of things that I own
+  ; only keep the keys for non-zero products
+  let my-stock stock-summary
+  let A filter [x -> table:get my-stock x > 0] (table:keys my-stock)
+
+  
+  let jac []
+  ; ask all processes what they require
+  ask processes [          
+    let B map [x -> item 0 x] [get-inputs] of self
+    let C map [x -> item 0 x] [get-catalysts] of self
+    ; calculate the Jaccard distance
+    let J jaccard-distance A (sentence B C)
+    set jac lput (list name J) jac
+    
+  ]
+  ; sorted list of [who distance]
+  set jac sort-by [ [i ii] -> item 1 i < item 1 ii ] jac
+  ;print (sentence "JACCARD: " jac)
+  
+  ; minimum distance
+  let min-dist min map [pair -> item 1 pair] jac  
+  ; list of who-IDs for processors matching the minimum
+  let closest-ids map [pair -> item 0 pair] filter [pair -> item 1 pair = min-dist] jac
+  
+  ;print (sentence closest-ids " from: " jac)
+  
+  report closest-ids
+end
+
+; {} social-neighbours
+; nothing implemented
+to-report social-neighbours
+  ;; find all processors with similar attributes
+  report nobody
+end
+
+; {} choose-land-use
+; nothing implemented
+to choose-land-use [ mgr ]
+  let lu (runresult algorithm mgr)
+end
+
+; {} make-neighborhood
+; define who to copy from
+to-report make-neighborhood
+  (ifelse neighborhood-choice = "random" [
+    report n-of (random count processors) processors
+  ] neighborhood-choice = "suppliers" [    
+    let i-make [] ; what I supply
+    ask implement-neighbors [ 
+      set i-make lput (sentence [product-type] of out-output-neighbors) i-make
+    ]
+    
+    ; find others who make the same things    
+    let N nobody
+    if length i-make > 0 [
+      foreach i-make [ thing -> 
+        set N (turtle-set (processors with [makes? item 0 thing]) N)
+      ]
+    ]        
+    report N
+  ] neighborhood-choice = "jaccard" [
+    let me self
+    ; list of things that I own
+    let A table:keys ([stock-summary] of me)
+    
+    let jac []
+    ; ask everyone else what they own
+    ask processors [      
+      if self != me [ ; don't measure distance to myself
+        ifelse length A = 0 [ 
+          ; if I didn't have anything, everyone is furthest away
+          set jac lput (list who 1) jac
+        ][
+          ; if I did have things, then get the things over each other processor          
+          let B [stock-summary] of self
+          ; calculate the Jaccard distance
+          let J jaccard-distance A table:keys B
+          set jac lput (list who J) jac
+        ]
+      ]
+    ]
+    ; sorted list of [who distance]
+    set jac sort-by [ [i ii] -> item 1 i < item 1 ii ] jac
+    
+    ; minimum distance
+    let min-dist min map [pair -> item 1 pair] jac
+    ; list of who-IDs for processors matching the minimum
+    let closest-ids map [pair -> item 0 pair] filter [pair -> item 1 pair = min-dist] jac
+    ; turtle-set matching minimum values
+    let closest-turtles turtle-set map [id -> turtle id] closest-ids
+    report closest-turtles
+  ] neighborhood-choice = "weighted-process" [
+    ;;
+  ][
+    error "make-neighborhood needs to be one of 'random', 'suppliers', 'jaccard' or 'weighted-process'"
+  ]) 
+end
+
+; {} jaccard-distance
+; calculate the Jaccard distance based on the dissimilarity between two sets
+to-report jaccard-distance [list1 list2]
+  let intersection length filter [x -> member? x list2] list1
+  let union length remove-duplicates (sentence list1 list2)
+  if union = 0 [ report 0 ]  ;; avoid division by zero
+  report 1 - (intersection / union)
+end
+
+;{processor} jaccard-multiple-algorithm 
+; find best-matching processes based on resources, and where there
+; are 'spare' resources, see if there are additional processes that 
+; could be run
+to-report jaccard-multiple-algorithm 
+  ; curent non-zero resources
+  let my-stock stock-summary
+  let my-things filter [x -> table:get my-stock x > 0] (table:keys my-stock)
+  
+  ; make space for variables
+  let eq nobody
+  let eq-list nobody
+  let A []
+  let B []
+  let needed-things []
+  let missing-things []
+  
+  ; if there are unused resources keep going
+  while [(length my-things > 0) AND (length missing-things <= 0)] [
+    set missing-things []
+    
+    ; pick a process matching resources
+    set eq one-of processes with [member? name (jaccard-2-algorithm my-things)]
+    set eq-list (turtle-set eq-list eq)
+    ; list the necessary resources
+    ask eq [
+      ; resources needed by process
+      set A map [x -> item 0 x] [get-inputs] of self
+      set B map [x -> item 0 x] [get-catalysts] of self
+    ]  
+    set needed-things (sentence A B)
+    set missing-things filter [x -> NOT member? x my-things] needed-things
+    
+    ; adjust remaining resources
+    set my-things filter [x -> NOT member? x needed-things] my-things     
+  ]
+    
+  ifelse eq-list = nobody [
+    report "nobody"
+  ][
+    report [name] of eq-list 
+  ]
+  
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
