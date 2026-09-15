@@ -10,14 +10,15 @@ The `paper_figures`, `system1`, `system2` and `system3` directories contain figu
 
 The `CITATION.cff` file contains machine-readable metadata for how to cite STRAVVS. A more human-readable form would be:
 
-[McCormick, B. J. J.](https://orcid.org/0000-0002-8060-0502), [Roxburgh, N.](https://orcid.org/0000-0002-7821-1831) & [Polhill, G.](https://orcid.org/0000-0002-8596-0590) (2026) STRAVVS: A flexible agent-based modelling framework for simulating dynamic value chain networks. _Zenodo_
+[McCormick, B. J. J.](https://orcid.org/0000-0002-8060-0502), [Roxburgh, N.](https://orcid.org/0000-0002-7821-1831) & [Polhill, G.](https://orcid.org/0000-0002-8596-0590) (2026) STRAVVS: A flexible agent-based modelling framework for simulating dynamic value chain networks. _Zenodo_ doi:[10.5281/zenodo.22772889](https://doi.org/10.5281/zenodo.22772889)
 
-[BibTeX](https://bibtex.eu/):
+[BibTeX](https://bibtex.eu/) (for all versions of STRAVVS):
 
 ```bibtex
 @misc{stravvs,
   author = {{McCormick}, Benjamin J. J. and Roxburgh, Nick and Polhill, Gary},
   title = {{STRAVVS}: A flexible agent-based modelling framework for simulating dynamic value chain networks},
   howpublished = {Zenodo},
+  url = {https://doi.org/10.5281/zenodo.22772889}
 }
 ```
