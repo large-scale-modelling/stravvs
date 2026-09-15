@@ -2182,7 +2182,7 @@ Polhill, G., McCormick, B.J.J., Roxburgh, N., Assefa, S., Matthews, K., 2024. A 
 
 ## How to Cite
 
-Benjamin JJ McCormick, Nick Roxburgh, and Gary Polhill (2026) STRAVVS: A flexible agent-based modelling framework for simulating dynamic value chain networks. _Zenodo_
+Benjamin JJ McCormick, Nick Roxburgh, and Gary Polhill (2026) STRAVVS: A flexible agent-based modelling framework for simulating dynamic value chain networks. _Zenodo_. DOI:[10.5281/zenodo.22772889](https://doi.org/10.5281/zenodo.22772889)
 
 Contact 
 Ben McCormick
